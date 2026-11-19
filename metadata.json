@@ -1,0 +1,6 @@
+{
+  "name": "Тихий голос (The Quiet Voice)",
+  "description": "Атмосферная 2D pixel-art психологическая хоррор-игра с видом сбоку о ночной поломке машины, заброшенном доме и сборке девушки-робота.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #07090d;
+    font-family: 'Golos Text', system-ui, -apple-system, sans-serif;
+    letter-spacing: 0.005em;
+    user-select: none;
+  }
+}
+
+.font-display,
+.font-pixel {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.font-ui {
+  font-family: 'Golos Text', system-ui, -apple-system, sans-serif;
+}
+
+.font-mono-ui {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Custom thin horror scrollbar for Journal & Inventory */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0e14;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b3340;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #485468;
+}
