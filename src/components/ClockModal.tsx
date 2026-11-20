@@ -21,19 +21,33 @@ export const ClockModal: React.FC<ClockModalProps> = ({
     alreadySolved ? 'solved' : 'idle'
   );
 
-  const adjustHours = (delta: number) => {
-    if (feedback === 'solved') return;
-    soundEngine.playSfx('keypad');
-    setFeedback('idle');
-    setHours((h) => (h + delta + 24) % 24);
-  };
+  const adjustHours = useCallback(
+    (delta: number) => {
+      if (feedback === 'solved') return;
+      soundEngine.playSfx('keypad');
+      setFeedback('idle');
+      setHours((h) => (h + delta + 24) % 24);
+    },
+    [feedback]
+  );
 
-  const adjustMinutes = (delta: number) => {
+  const adjustMinutes = useCallback(
+    (delta: number) => {
+      if (feedback === 'solved') return;
+      soundEngine.playSfx('keypad');
+      setFeedback('idle');
+      setMinutes((m) => (m + delta + 60) % 60);
+    },
+    [feedback]
+  );
+
+  const handleReset = useCallback(() => {
     if (feedback === 'solved') return;
-    soundEngine.playSfx('keypad');
+    soundEngine.playUiSfx('cancel');
     setFeedback('idle');
-    setMinutes((m) => (m + delta + 60) % 60);
-  };
+    setHours(3);
+    setMinutes(0);
+  }, [feedback]);
 
   const handleCheck = useCallback(() => {
     if (feedback === 'solved') return;
@@ -49,15 +63,32 @@ export const ClockModal: React.FC<ClockModalProps> = ({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && feedback !== 'solved') {
+      if (feedback === 'solved') return;
+      if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
         handleCheck();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustHours(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustHours(1);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustMinutes(-5);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustMinutes(5);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [feedback, handleCheck]);
+  }, [adjustHours, adjustMinutes, feedback, handleCheck]);
 
   const hourAngle = ((hours % 12) + minutes / 60) * 30;
   const minuteAngle = minutes * 6;
@@ -234,7 +265,7 @@ export const ClockModal: React.FC<ClockModalProps> = ({
           </div>
         </div>
 
-        <p className="text-[11px] leading-relaxed text-[#8293a6] text-center mb-4">
+        <p aria-live="polite" className="text-[11px] leading-relaxed text-[#8293a6] text-center mb-4">
           {feedback === 'solved'
             ? 'Маятник откинулся в сторону: внутри найден ключ от подвала и батарейка.'
             : feedback === 'wrong'
@@ -251,14 +282,23 @@ export const ClockModal: React.FC<ClockModalProps> = ({
             Закрыть [Esc]
           </button>
           {feedback !== 'solved' && (
-            <button
-              type="button"
-              onClick={handleCheck}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-[#d4aa4c] hover:bg-[#ebc367] text-[#090c12] text-xs font-semibold cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Проверить ход
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-2.5 py-1.5 border border-[#2c3645] hover:bg-[#171e29] text-xs text-[#8da1b5] cursor-pointer"
+              >
+                Сброс
+              </button>
+              <button
+                type="button"
+                onClick={handleCheck}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-[#d4aa4c] hover:bg-[#ebc367] text-[#090c12] text-xs font-semibold cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Проверить ход
+              </button>
+            </div>
           )}
         </div>
     </GameModal>

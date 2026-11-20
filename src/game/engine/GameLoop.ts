@@ -17,6 +17,7 @@ export class GameLoop {
   private rafId = 0;
   private running = false;
   private lastTimeMs = 0;
+  private elapsedSec = 0;
   private simAccumulator = 0;
   private renderAccumulator = 0;
   private renderFpsCap: RenderFpsCap = 0;
@@ -68,17 +69,19 @@ export class GameLoop {
     try {
       const rawDeltaMs = nowMs - this.lastTimeMs;
       this.lastTimeMs = nowMs;
-      if (rawDeltaMs > 0) {
-        gameDiagnostics.recordFrameInterval(rawDeltaMs);
-      }
 
       if (this.callbacks.isHidden?.()) {
         return;
       }
 
+      if (rawDeltaMs > 0 && rawDeltaMs <= 500) {
+        gameDiagnostics.recordFrameInterval(rawDeltaMs);
+      }
+
       const rawDt = rawDeltaMs / 1000;
       const dt = Number.isFinite(rawDt) ? Math.min(Math.max(rawDt, 0.001), 0.1) : 0.016;
-      const timeSec = Number.isFinite(nowMs) ? nowMs / 1000 : 0;
+      this.elapsedSec += dt;
+      const timeSec = this.elapsedSec;
 
       const simStart = performance.now();
       this.simAccumulator = Math.min(this.simAccumulator + dt, FIXED_SIM_STEP * MAX_SUBSTEPS);

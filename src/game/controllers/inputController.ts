@@ -59,3 +59,7 @@ export function rebindKeyAction(
   next[action] = newCode;
   return next;
 }
+
+export function isKeyBoundToAction(code: string, bindings: KeyBindings): boolean {
+  return (Object.values(bindings) as string[]).includes(code);
+}

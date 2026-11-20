@@ -1,4 +1,4 @@
-import { WorldZone } from './types';
+import { HorrorMood, WorldZone } from './types';
 
 const MAX_ACTIVE_SFX = 18;
 
@@ -25,8 +25,10 @@ class HorrorAudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private ambienceBus: GainNode | null = null;
+  private musicBus: GainNode | null = null;
   private sfxBus: GainNode | null = null;
   private voiceBus: GainNode | null = null;
+  private uiBus: GainNode | null = null;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
   private windGain: GainNode | null = null;
@@ -34,17 +36,27 @@ class HorrorAudioEngine {
   private droneGain: GainNode | null = null;
   private droneOsc1: OscillatorNode | null = null;
   private droneOsc2: OscillatorNode | null = null;
+  private musicPadGain: GainNode | null = null;
+  private musicFilter: BiquadFilterNode | null = null;
+  private musicOscA: OscillatorNode | null = null;
+  private musicOscB: OscillatorNode | null = null;
+  private musicOscSub: OscillatorNode | null = null;
   private hearthGain: GainNode | null = null;
   private engineGain: GainNode | null = null;
   private engineOsc: OscillatorNode | null = null;
+  private persistentSources: AudioScheduledSourceNode[] = [];
   private sharedWhiteNoise: AudioBuffer | null = null;
   private activeVoiceExpiries: number[] = [];
 
   private muted = false;
   private masterVol = 0.78;
   private ambienceVol = 0.82;
+  private musicVol = 0.7;
   private sfxVol = 0.9;
   private voiceVol = 0.92;
+  private uiVol = 0.85;
+  private moodTension = 0.15;
+  private currentMood: HorrorMood = 'calm';
   private dialogueDucking = false;
   private initialized = false;
   private hasUserGesture = false;
@@ -56,6 +68,9 @@ class HorrorAudioEngine {
   private lastEngineFreq = -1;
   private lastDroneTarget = -1;
   private lastDroneFreq = -1;
+  private lastMusicTarget = -1;
+  private lastMusicCutoff = -1;
+  private lastMusicFreqB = -1;
   private lastHearthTarget = -1;
   private lastAmbienceTime = -1;
 
@@ -68,11 +83,18 @@ class HorrorAudioEngine {
         const duck = this.dialogueDucking ? 0.58 : 1;
         this.ambienceBus.gain.setTargetAtTime(this.ambienceVol * duck, now, 0.08);
       }
+      if (this.musicBus) {
+        const musicDuck = this.dialogueDucking ? 0.65 : 1;
+        this.musicBus.gain.setTargetAtTime(this.musicVol * musicDuck, now, 0.12);
+      }
       if (this.sfxBus) {
         this.sfxBus.gain.setTargetAtTime(this.sfxVol, now, 0.06);
       }
       if (this.voiceBus) {
         this.voiceBus.gain.setTargetAtTime(this.voiceVol, now, 0.06);
+      }
+      if (this.uiBus) {
+        this.uiBus.gain.setTargetAtTime(this.uiVol, now, 0.04);
       }
     } catch {
       // Ignore audio param errors
@@ -123,6 +145,10 @@ class HorrorAudioEngine {
       this.ambienceBus.gain.value = this.ambienceVol;
       this.ambienceBus.connect(this.masterGain);
 
+      this.musicBus = this.ctx.createGain();
+      this.musicBus.gain.value = this.musicVol;
+      this.musicBus.connect(this.masterGain);
+
       this.sfxBus = this.ctx.createGain();
       this.sfxBus.gain.value = this.sfxVol;
       this.sfxBus.connect(this.masterGain);
@@ -130,6 +156,10 @@ class HorrorAudioEngine {
       this.voiceBus = this.ctx.createGain();
       this.voiceBus.gain.value = this.voiceVol;
       this.voiceBus.connect(this.masterGain);
+
+      this.uiBus = this.ctx.createGain();
+      this.uiBus.gain.value = this.uiVol;
+      this.uiBus.connect(this.masterGain);
 
       // Pre-allocate shared white noise buffer to avoid per-SFX GC churn
       const noiseLen = Math.floor(this.ctx.sampleRate * 2.5);
@@ -142,6 +172,7 @@ class HorrorAudioEngine {
       this.setupRainLoop();
       this.setupWindLoop();
       this.setupDroneLoop();
+      this.setupMusicLoop();
       this.setupHearthLoop();
       this.setupCarEngineLoop();
       this.initialized = true;
@@ -177,24 +208,46 @@ class HorrorAudioEngine {
     ambience: number;
     sfx: number;
     voice: number;
+    music?: number;
+    ui?: number;
   }): void {
     this.masterVol = Math.max(0, Math.min(1, finiteOr(vols.master, 0.78)));
     this.ambienceVol = Math.max(0, Math.min(1, finiteOr(vols.ambience, 0.82)));
     this.sfxVol = Math.max(0, Math.min(1, finiteOr(vols.sfx, 0.9)));
     this.voiceVol = Math.max(0, Math.min(1, finiteOr(vols.voice, 0.92)));
+    if (vols.music !== undefined) {
+      this.musicVol = Math.max(0, Math.min(1, finiteOr(vols.music, 0.7)));
+    }
+    if (vols.ui !== undefined) {
+      this.uiVol = Math.max(0, Math.min(1, finiteOr(vols.ui, 0.85)));
+    }
     this.applyGainTargets();
+  }
+
+  public setMoodTension(mood: HorrorMood, tension: number): void {
+    this.currentMood = mood;
+    this.moodTension = Math.max(0, Math.min(1, finiteOr(tension, 0)));
   }
 
   public setDialogueDucking(active: boolean): void {
     if (this.dialogueDucking === active) return;
     this.dialogueDucking = active;
     try {
-      if (this.ambienceBus && this.ctx) {
-        this.ambienceBus.gain.setTargetAtTime(
-          this.ambienceVol * (active ? 0.58 : 1.0),
-          this.ctx.currentTime,
-          0.18
-        );
+      if (this.ctx) {
+        if (this.ambienceBus) {
+          this.ambienceBus.gain.setTargetAtTime(
+            this.ambienceVol * (active ? 0.58 : 1.0),
+            this.ctx.currentTime,
+            0.18
+          );
+        }
+        if (this.musicBus) {
+          this.musicBus.gain.setTargetAtTime(
+            this.musicVol * (active ? 0.65 : 1.0),
+            this.ctx.currentTime,
+            0.18
+          );
+        }
       }
     } catch {
       // Ignore audio param errors
@@ -217,7 +270,7 @@ class HorrorAudioEngine {
     tail: AudioNode,
     durationSec: number,
     pan = 0,
-    bus: 'sfx' | 'voice' = 'sfx',
+    bus: 'sfx' | 'voice' | 'ui' = 'sfx',
     startAt?: number
   ): { release: () => void } | null {
     if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return null;
@@ -228,6 +281,8 @@ class HorrorAudioEngine {
     const targetBus =
       bus === 'voice'
         ? this.voiceBus ?? this.masterGain
+        : bus === 'ui'
+        ? this.uiBus ?? this.sfxBus ?? this.masterGain
         : this.sfxBus ?? this.masterGain;
 
     let panner: StereoPannerNode | null = null;
@@ -292,6 +347,7 @@ class HorrorAudioEngine {
     this.rainFilter.connect(this.rainGain);
     this.rainGain.connect(this.ambienceBus ?? this.masterGain);
     noise.start();
+    this.persistentSources.push(noise);
   }
 
   private setupWindLoop(): void {
@@ -312,6 +368,7 @@ class HorrorAudioEngine {
     this.windFilter.connect(this.windGain);
     this.windGain.connect(this.ambienceBus ?? this.masterGain);
     src.start();
+    this.persistentSources.push(src);
   }
 
   private setupDroneLoop(): void {
@@ -338,6 +395,42 @@ class HorrorAudioEngine {
 
     this.droneOsc1.start();
     this.droneOsc2.start();
+    this.persistentSources.push(this.droneOsc1, this.droneOsc2);
+  }
+
+  private setupMusicLoop(): void {
+    if (!this.ctx || !this.masterGain) return;
+    this.musicPadGain = this.ctx.createGain();
+    this.musicPadGain.gain.value = 0;
+
+    this.musicFilter = this.ctx.createBiquadFilter();
+    this.musicFilter.type = 'lowpass';
+    this.musicFilter.frequency.value = 280;
+    this.musicFilter.Q.value = 1.4;
+
+    // Minor-ninth / tritone shifting dark ambient pad voices
+    this.musicOscA = this.ctx.createOscillator();
+    this.musicOscA.type = 'sine';
+    this.musicOscA.frequency.value = 110; // A2
+
+    this.musicOscB = this.ctx.createOscillator();
+    this.musicOscB.type = 'triangle';
+    this.musicOscB.frequency.value = 130.81; // C3
+
+    this.musicOscSub = this.ctx.createOscillator();
+    this.musicOscSub.type = 'sine';
+    this.musicOscSub.frequency.value = 55; // A1 sub anchor
+
+    this.musicOscA.connect(this.musicFilter);
+    this.musicOscB.connect(this.musicFilter);
+    this.musicOscSub.connect(this.musicFilter);
+    this.musicFilter.connect(this.musicPadGain);
+    this.musicPadGain.connect(this.musicBus ?? this.masterGain);
+
+    this.musicOscA.start();
+    this.musicOscB.start();
+    this.musicOscSub.start();
+    this.persistentSources.push(this.musicOscA, this.musicOscB, this.musicOscSub);
   }
 
   private setupHearthLoop(): void {
@@ -358,6 +451,7 @@ class HorrorAudioEngine {
     bandpass.connect(this.hearthGain);
     this.hearthGain.connect(this.ambienceBus ?? this.masterGain);
     src.start();
+    this.persistentSources.push(src);
   }
 
   private setupCarEngineLoop(): void {
@@ -377,6 +471,7 @@ class HorrorAudioEngine {
     filter.connect(this.engineGain);
     this.engineGain.connect(this.ambienceBus ?? this.masterGain);
     this.engineOsc.start();
+    this.persistentSources.push(this.engineOsc);
   }
 
   private scheduleParam(
@@ -430,6 +525,12 @@ class HorrorAudioEngine {
         this.lastRainTarget = this.scheduleParam(this.rainGain.gain, 0.14, this.lastRainTarget, now, 0.4);
         this.lastDroneTarget = this.scheduleParam(this.droneGain.gain, 0.025, this.lastDroneTarget, now, 0.5);
         this.lastEngineTarget = this.scheduleParam(this.engineGain.gain, 0, this.lastEngineTarget, now, 0.15);
+        if (this.musicPadGain && this.musicFilter && this.musicOscB) {
+          const breathe = 0.024 + (Math.sin(now * 0.35) * 0.5 + 0.5) * 0.012;
+          this.lastMusicTarget = this.scheduleParam(this.musicPadGain.gain, breathe, this.lastMusicTarget, now, 0.7);
+          this.lastMusicCutoff = this.scheduleParam(this.musicFilter.frequency, 240, this.lastMusicCutoff, now, 0.6, 2);
+          this.lastMusicFreqB = this.scheduleParam(this.musicOscB.frequency, 130.81, this.lastMusicFreqB, now, 0.5, 0.2);
+        }
         if (this.hearthGain) {
           this.lastHearthTarget = this.scheduleParam(this.hearthGain.gain, 0, this.lastHearthTarget, now, 0.25);
         }
@@ -443,6 +544,9 @@ class HorrorAudioEngine {
         this.lastRainTarget = this.scheduleParam(this.rainGain.gain, 0, this.lastRainTarget, now, 0.2);
         this.lastDroneTarget = this.scheduleParam(this.droneGain.gain, 0, this.lastDroneTarget, now, 0.2);
         this.lastEngineTarget = this.scheduleParam(this.engineGain.gain, 0, this.lastEngineTarget, now, 0.15);
+        if (this.musicPadGain) {
+          this.lastMusicTarget = this.scheduleParam(this.musicPadGain.gain, 0.008, this.lastMusicTarget, now, 0.35);
+        }
         if (this.hearthGain) {
           this.lastHearthTarget = this.scheduleParam(this.hearthGain.gain, 0, this.lastHearthTarget, now, 0.2);
         }
@@ -521,6 +625,40 @@ class HorrorAudioEngine {
       const droneFreq = safeFreq((opts.finaleActive ? 53.5 : 72.5 - stageFactor * 6) + flutter, 72.5);
       this.lastDroneTarget = this.scheduleParam(this.droneGain.gain, droneTarget, this.lastDroneTarget, now, 0.4);
       this.lastDroneFreq = this.scheduleParam(this.droneOsc2.frequency, droneFreq, this.lastDroneFreq, now, 0.3, 0.15);
+
+      if (this.musicPadGain && this.musicFilter && this.musicOscB) {
+        const moodWeight =
+          this.currentMood === 'peak'
+            ? 1.0
+            : this.currentMood === 'threat'
+            ? 0.82
+            : this.currentMood === 'suspense'
+            ? 0.58
+            : this.currentMood === 'unease'
+            ? 0.38
+            : this.currentMood === 'aftermath'
+            ? 0.28
+            : 0.2;
+        const tensionBlend = Math.max(this.moodTension, stageFactor * 0.75, moodWeight * 0.7);
+        const swell = Math.sin(now * (0.45 + tensionBlend * 0.9)) * 0.5 + 0.5;
+        const musicGain = opts.finaleActive
+          ? 0.055 + swell * 0.025
+          : opts.zone === 'house'
+          ? 0.016 + tensionBlend * 0.032 + swell * 0.01
+          : 0.012 + swell * 0.008;
+        const musicCutoff = opts.finaleActive
+          ? 520
+          : 210 + tensionBlend * 240 + swell * 45;
+        // Shift harmony from minor third (130.81 Hz) toward dissonant flat-second/tritone (116.54 / 155.56 Hz)
+        const freqB = opts.finaleActive
+          ? 155.56 + Math.sin(now * 1.8) * 1.5
+          : tensionBlend > 0.65
+          ? 116.54
+          : 130.81;
+        this.lastMusicTarget = this.scheduleParam(this.musicPadGain.gain, musicGain, this.lastMusicTarget, now, 0.6);
+        this.lastMusicCutoff = this.scheduleParam(this.musicFilter.frequency, musicCutoff, this.lastMusicCutoff, now, 0.5, 2);
+        this.lastMusicFreqB = this.scheduleParam(this.musicOscB.frequency, freqB, this.lastMusicFreqB, now, 0.8, 0.2);
+      }
     } catch {
       // Prevent ambience math/API edge cases from interrupting the render loop
     }
@@ -574,7 +712,7 @@ class HorrorAudioEngine {
     }
   }
 
-  public playFootstep(material: 'gravel' | 'wood' | 'tile' | 'carpet' | 'concrete'): void {
+  public playFootstep(material: 'gravel' | 'wood' | 'tile' | 'carpet' | 'concrete', pan = 0): void {
     if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain || this.muted) return;
     if (!this.hasVoiceCapacity()) return;
     try {
@@ -585,42 +723,48 @@ class HorrorAudioEngine {
       const jitter = 0.92 + Math.random() * 0.16;
 
       lp.type = 'lowpass';
-      lp.frequency.value = material === 'tile' ? 900 : material === 'carpet' ? 240 : 420;
+      lp.frequency.value = material === 'tile' ? 980 : material === 'carpet' ? 240 : 460;
 
       if (material === 'wood') {
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(safeFreq(104 * jitter), now);
-        osc.frequency.exponentialRampToValueAtTime(44, now + 0.085);
-        gain.gain.setValueAtTime(0.075, now);
-        this.playNoiseBurst(0.042, 'bandpass', 640 * jitter, 1.9, 0.022);
+        osc.frequency.setValueAtTime(safeFreq(108 * jitter), now);
+        osc.frequency.exponentialRampToValueAtTime(42, now + 0.09);
+        gain.gain.setValueAtTime(0.078, now);
+        this.playNoiseBurst(0.044, 'bandpass', 640 * jitter, 1.9, 0.024, pan);
+        // Subtle hollow floorboard overtone on heel strike
+        this.playNoiseBurst(0.025, 'bandpass', 280 * jitter, 2.8, 0.015, pan, 0.018);
       } else if (material === 'tile') {
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(safeFreq(310 * jitter), now);
-        osc.frequency.exponentialRampToValueAtTime(110, now + 0.05);
+        osc.frequency.setValueAtTime(safeFreq(315 * jitter), now);
+        osc.frequency.exponentialRampToValueAtTime(108, now + 0.052);
         gain.gain.setValueAtTime(0.055, now);
-        this.playNoiseBurst(0.026, 'highpass', 2100 * jitter, 1.1, 0.016);
+        this.playNoiseBurst(0.026, 'highpass', 2150 * jitter, 1.1, 0.016, pan);
       } else if (material === 'carpet') {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(safeFreq(72 * jitter), now);
         osc.frequency.exponentialRampToValueAtTime(34, now + 0.06);
         gain.gain.setValueAtTime(0.038, now);
-        this.playNoiseBurst(0.035, 'lowpass', 320, 0.8, 0.012);
+        this.playNoiseBurst(0.035, 'lowpass', 320, 0.8, 0.012, pan);
       } else {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(safeFreq(132 * jitter), now);
-        osc.frequency.exponentialRampToValueAtTime(56, now + 0.07);
+        osc.frequency.exponentialRampToValueAtTime(56, now + 0.072);
         gain.gain.setValueAtTime(0.055, now);
         if (material === 'gravel') {
-          this.playNoiseBurst(0.068, 'bandpass', 1520 * jitter, 1.4, 0.036);
+          this.playNoiseBurst(0.072, 'bandpass', 1520 * jitter, 1.4, 0.038, pan);
+          // Occasional wet puddle splash scatter outdoors in the rain
+          if (Math.random() < 0.36) {
+            this.playNoiseBurst(0.085, 'highpass', 2400 * jitter, 1.2, 0.022, pan, 0.014);
+          }
         } else {
-          this.playNoiseBurst(0.035, 'bandpass', 520 * jitter, 1.5, 0.018);
+          this.playNoiseBurst(0.036, 'bandpass', 540 * jitter, 1.6, 0.02, pan);
         }
       }
 
       gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.095);
       osc.connect(lp);
       lp.connect(gain);
-      const slot = this.connectVoiceChain(osc, gain, 0.1, 0, 'sfx', now);
+      const slot = this.connectVoiceChain(osc, gain, 0.1, pan, 'sfx', now);
       if (!slot) return;
       try {
         osc.start(now);
@@ -725,7 +869,11 @@ class HorrorAudioEngine {
       | 'knock'
       | 'whisper'
       | 'pipe_clang'
-      | 'breath',
+      | 'breath'
+      | 'clock_tick'
+      | 'drip'
+      | 'hearth_crackle'
+      | 'servo_hum',
     pan = 0
   ): void {
     if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain || this.muted) return;
@@ -744,7 +892,17 @@ class HorrorAudioEngine {
       filter.connect(gain);
 
       const estDuration =
-        kind === 'thunder' ? 1.4 : kind === 'finale' ? 1.2 : kind === 'breath' ? 0.76 : kind === 'whisper' ? 0.62 : 0.45;
+        kind === 'thunder'
+          ? 1.55
+          : kind === 'finale'
+          ? 1.2
+          : kind === 'breath'
+          ? 0.76
+          : kind === 'whisper'
+          ? 0.62
+          : kind === 'servo_hum'
+          ? 0.55
+          : 0.45;
       const slot = this.connectVoiceChain(osc, gain, estDuration, pan, 'sfx', now);
       if (!slot) return;
 
@@ -768,14 +926,16 @@ class HorrorAudioEngine {
           this.playNoiseBurst(0.03, 'highpass', 2400, 1.2, 0.02, pan);
           break;
         case 'install':
+          // Metallic servo socket lock + pneumatic hiss + eerie harmonic chime
           osc.type = 'triangle';
-          filter.frequency.value = 950;
+          filter.frequency.value = 1150;
           osc.frequency.setValueAtTime(145, now);
-          osc.frequency.exponentialRampToValueAtTime(280, now + 0.11);
+          osc.frequency.exponentialRampToValueAtTime(320, now + 0.12);
           gain.gain.setValueAtTime(0.11, now);
-          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.24);
-          startOsc(now + 0.25);
-          this.playNoiseBurst(0.055, 'bandpass', 1800, 2.4, 0.048, pan);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.28);
+          startOsc(now + 0.29);
+          this.playNoiseBurst(0.065, 'bandpass', 1850, 2.4, 0.048, pan);
+          this.playNoiseBurst(0.09, 'highpass', 2600, 1.6, 0.022, pan, 0.05);
           break;
         case 'paper':
           osc.type = 'triangle';
@@ -788,14 +948,16 @@ class HorrorAudioEngine {
           this.playNoiseBurst(0.11, 'bandpass', 2200, 1.3, 0.042, pan);
           break;
         case 'door':
+          // Handle latch click + solid wooden thud + faint creak tail
           osc.type = 'triangle';
-          filter.frequency.value = 340;
-          osc.frequency.setValueAtTime(112, now);
-          osc.frequency.exponentialRampToValueAtTime(58, now + 0.19);
-          gain.gain.setValueAtTime(0.095, now);
-          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.21);
-          startOsc(now + 0.22);
-          this.playNoiseBurst(0.14, 'bandpass', 560, 1.8, 0.034, pan);
+          filter.frequency.value = 380;
+          osc.frequency.setValueAtTime(124, now + 0.025);
+          osc.frequency.exponentialRampToValueAtTime(54, now + 0.21);
+          gain.gain.setValueAtTime(0.098, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.23);
+          startOsc(now + 0.24);
+          this.playNoiseBurst(0.024, 'bandpass', 1650, 2.2, 0.036, pan, 0);
+          this.playNoiseBurst(0.15, 'bandpass', 540, 1.8, 0.034, pan, 0.035);
           break;
         case 'locked':
           // Heavy brass/iron latch rattle instead of raw beep
@@ -920,12 +1082,13 @@ class HorrorAudioEngine {
           break;
         case 'thunder':
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(68, now);
-          osc.frequency.exponentialRampToValueAtTime(26, now + 1.3);
-          gain.gain.setValueAtTime(0.16, now);
-          gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.35);
-          startOsc(now + 1.4);
-          this.playNoiseBurst(1.1, 'lowpass', 220, 0.7, 0.14, pan);
+          osc.frequency.setValueAtTime(72, now);
+          osc.frequency.exponentialRampToValueAtTime(24, now + 1.45);
+          gain.gain.setValueAtTime(0.17, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.5);
+          startOsc(now + 1.54);
+          this.playNoiseBurst(0.28, 'bandpass', 520, 0.9, 0.095, pan, 0);
+          this.playNoiseBurst(1.25, 'lowpass', 210, 0.7, 0.14, pan, 0.12);
           break;
         case 'creak':
           // Filtered woody floorboard groan
@@ -1081,6 +1244,55 @@ class HorrorAudioEngine {
           startOsc(now + 0.76);
           this.playNoiseBurst(0.68, 'bandpass', 740, 2.6, 0.056, pan, 0.04, 'voice');
           break;
+        case 'clock_tick':
+          // Crisp wooden escapement resonator + brass click
+          osc.type = 'triangle';
+          filter.type = 'bandpass';
+          filter.frequency.value = 1150;
+          filter.Q.value = 2.4;
+          osc.frequency.setValueAtTime(420, now);
+          osc.frequency.exponentialRampToValueAtTime(185, now + 0.032);
+          gain.gain.setValueAtTime(0.038, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.042);
+          startOsc(now + 0.05);
+          this.playNoiseBurst(0.018, 'highpass', 2400, 1.5, 0.022, pan);
+          break;
+        case 'drip':
+          // Subterranean water droplet chirp + tiny wet splash
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(620 + Math.random() * 110, now);
+          osc.frequency.exponentialRampToValueAtTime(1480 + Math.random() * 180, now + 0.048);
+          gain.gain.setValueAtTime(0.045, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.07);
+          startOsc(now + 0.075);
+          this.playNoiseBurst(0.024, 'bandpass', 1800, 2.0, 0.012, pan, 0.015);
+          break;
+        case 'hearth_crackle':
+          // Warm low-key timber pop + ember spark crackle
+          osc.type = 'triangle';
+          filter.type = 'bandpass';
+          filter.frequency.value = 340;
+          osc.frequency.setValueAtTime(140, now);
+          osc.frequency.exponentialRampToValueAtTime(65, now + 0.035);
+          gain.gain.setValueAtTime(0.025, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.045);
+          startOsc(now + 0.05);
+          this.playNoiseBurst(0.038, 'bandpass', 2100 + Math.random() * 700, 2.2, 0.024, pan, 0);
+          break;
+        case 'servo_hum':
+          // Articulated Echo-4 actuator micro-twitch whine + tiny relay click
+          osc.type = 'sine';
+          filter.type = 'bandpass';
+          filter.frequency.value = 640;
+          filter.Q.value = 2.0;
+          osc.frequency.setValueAtTime(240, now);
+          osc.frequency.linearRampToValueAtTime(325, now + 0.18);
+          osc.frequency.linearRampToValueAtTime(215, now + 0.46);
+          gain.gain.setValueAtTime(0.032, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.52);
+          startOsc(now + 0.54);
+          this.playNoiseBurst(0.022, 'highpass', 2200, 1.8, 0.018, pan, 0.04);
+          break;
       }
     } catch {
       // Never allow SFX scheduling failures to propagate
@@ -1175,6 +1387,72 @@ class HorrorAudioEngine {
     }
   }
 
+  public playUiSfx(kind: 'hover' | 'click' | 'confirm' | 'cancel' | 'error'): void {
+    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain || this.muted) return;
+    if (!this.hasVoiceCapacity()) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.connect(gain);
+      const slot = this.connectVoiceChain(osc, gain, 0.16, 0, 'ui', now);
+      if (!slot) return;
+
+      const startOsc = (stopAt: number) => {
+        try {
+          osc.start(now);
+          osc.stop(stopAt);
+        } catch {
+          slot.release();
+        }
+      };
+
+      switch (kind) {
+        case 'hover':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(420, now);
+          gain.gain.setValueAtTime(0.016, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.028);
+          startOsc(now + 0.032);
+          break;
+        case 'click':
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(520, now);
+          osc.frequency.exponentialRampToValueAtTime(340, now + 0.04);
+          gain.gain.setValueAtTime(0.038, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.045);
+          startOsc(now + 0.05);
+          break;
+        case 'confirm':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.exponentialRampToValueAtTime(660, now + 0.09);
+          gain.gain.setValueAtTime(0.05, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.12);
+          startOsc(now + 0.13);
+          break;
+        case 'cancel':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(380, now);
+          osc.frequency.exponentialRampToValueAtTime(240, now + 0.08);
+          gain.gain.setValueAtTime(0.04, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.09);
+          startOsc(now + 0.1);
+          break;
+        case 'error':
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(210, now);
+          osc.frequency.linearRampToValueAtTime(145, now + 0.13);
+          gain.gain.setValueAtTime(0.055, now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.14);
+          startOsc(now + 0.15);
+          break;
+      }
+    } catch {
+      // Ignore UI SFX errors
+    }
+  }
+
   public playRadioProximityBlip(strength: number): void {
     if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain || this.muted) return;
     if (!this.hasVoiceCapacity()) return;
@@ -1201,6 +1479,53 @@ class HorrorAudioEngine {
       this.playNoiseBurst(0.06, 'bandpass', 1900 + clamped * 900, 3.2, 0.014 + clamped * 0.018);
     } catch {
       // Ignore proximity blip error
+    }
+  }
+
+  public dispose(): void {
+    for (const src of this.persistentSources) {
+      try {
+        src.stop();
+        src.disconnect();
+      } catch {
+        // Ignore already stopped source
+      }
+    }
+    this.persistentSources = [];
+    this.activeVoiceExpiries = [];
+    this.rainGain = null;
+    this.rainFilter = null;
+    this.windGain = null;
+    this.windFilter = null;
+    this.droneGain = null;
+    this.droneOsc1 = null;
+    this.droneOsc2 = null;
+    this.musicPadGain = null;
+    this.musicFilter = null;
+    this.musicOscA = null;
+    this.musicOscB = null;
+    this.musicOscSub = null;
+    this.hearthGain = null;
+    this.engineGain = null;
+    this.engineOsc = null;
+    this.ambienceBus = null;
+    this.musicBus = null;
+    this.sfxBus = null;
+    this.voiceBus = null;
+    this.uiBus = null;
+    this.masterGain = null;
+    this.sharedWhiteNoise = null;
+    this.initialized = false;
+    if (this.ctx) {
+      const ctx = this.ctx;
+      this.ctx = null;
+      try {
+        if (ctx.state !== 'closed') {
+          void ctx.close().catch(() => undefined);
+        }
+      } catch {
+        // Ignore close failure
+      }
     }
   }
 }

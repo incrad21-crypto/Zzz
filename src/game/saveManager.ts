@@ -97,13 +97,11 @@ const FALLBACK_KEY_POOL = [
   'KeyV',
   'KeyB',
   'KeyN',
-  'KeyM',
   'KeyG',
   'KeyH',
   'KeyU',
   'KeyI',
   'KeyO',
-  'KeyP',
   'Digit1',
   'Digit2',
   'Digit3',
@@ -176,18 +174,23 @@ export const DEFAULT_SETTINGS: GameSettings = {
   ambienceVolume: 0.82,
   sfxVolume: 0.9,
   voiceVolume: 0.92,
+  musicVolume: 0.7,
+  uiVolume: 0.85,
   subtitleSize: 'medium',
   subtitleBg: true,
   textSpeed: 'normal',
   uiScale: 'normal',
   screenShake: true,
   reduceFlashes: false,
+  reducedMotion: false,
   visualNoise: true,
   soundCaptions: true,
   difficulty: 'standard',
   touchControls: false,
   touchSize: 'medium',
   touchLayout: 'standard',
+  gamepadDeadzone: 0.28,
+  gamepadVibration: true,
   renderFpsCap: 0,
   keyBindings: { ...DEFAULT_KEY_BINDINGS },
 };
@@ -316,6 +319,11 @@ export function loadSettingsWithStatus(storage: StorageLike | null = getDefaultS
     }
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     const kbValidation = validateAndRepairKeyBindings(parsed.keyBindings);
+    const deadzoneRaw =
+      typeof parsed.gamepadDeadzone === 'number' && Number.isFinite(parsed.gamepadDeadzone)
+        ? Math.max(0.08, Math.min(0.5, parsed.gamepadDeadzone))
+        : (DEFAULT_SETTINGS.gamepadDeadzone ?? 0.28);
+
     const settings: GameSettings = {
       ...DEFAULT_SETTINGS,
       ...parsed,
@@ -323,17 +331,24 @@ export function loadSettingsWithStatus(storage: StorageLike | null = getDefaultS
       ambienceVolume: clampUnit(parsed.ambienceVolume, DEFAULT_SETTINGS.ambienceVolume),
       sfxVolume: clampUnit(parsed.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
       voiceVolume: clampUnit(parsed.voiceVolume, DEFAULT_SETTINGS.voiceVolume),
+      musicVolume: clampUnit(parsed.musicVolume, DEFAULT_SETTINGS.musicVolume ?? 0.7),
+      uiVolume: clampUnit(parsed.uiVolume, DEFAULT_SETTINGS.uiVolume ?? 0.85),
       uiScale: sanitizeUiScale(parsed.uiScale),
       touchControls:
         typeof parsed.touchControls === 'boolean' ? parsed.touchControls : autoTouch,
       touchSize: sanitizeTouchSize(parsed.touchSize),
       touchLayout: sanitizeTouchLayout(parsed.touchLayout),
+      reducedMotion:
+        typeof parsed.reducedMotion === 'boolean' ? parsed.reducedMotion : false,
       visualNoise:
         typeof parsed.visualNoise === 'boolean' ? parsed.visualNoise : DEFAULT_SETTINGS.visualNoise,
       soundCaptions:
         typeof parsed.soundCaptions === 'boolean'
           ? parsed.soundCaptions
           : DEFAULT_SETTINGS.soundCaptions,
+      gamepadDeadzone: deadzoneRaw,
+      gamepadVibration:
+        typeof parsed.gamepadVibration === 'boolean' ? parsed.gamepadVibration : true,
       difficulty: sanitizeDifficulty(parsed.difficulty),
       renderFpsCap: sanitizeRenderFpsCap(parsed.renderFpsCap),
       keyBindings: kbValidation.bindings,
@@ -362,6 +377,19 @@ export function loadSettingsWithStatus(storage: StorageLike | null = getDefaultS
 
 export function loadSettings(storage: StorageLike | null = getDefaultStorage()): GameSettings {
   return loadSettingsWithStatus(storage).settings;
+}
+
+export function resetSettingsToDefault(
+  storage: StorageLike | null = getDefaultStorage()
+): GameSettings {
+  const autoTouch = detectCoarsePointer();
+  const defaults: GameSettings = {
+    ...DEFAULT_SETTINGS,
+    touchControls: autoTouch,
+    keyBindings: { ...DEFAULT_KEY_BINDINGS },
+  };
+  saveSettings(defaults, storage);
+  return defaults;
 }
 
 export function saveSettings(
@@ -564,9 +592,22 @@ export function loadSaveWithRecovery(storage: StorageLike | null = getDefaultSto
 }
 
 export function readSaveSummary(storage: StorageLike | null = getDefaultStorage()): SaveSummaryMeta | null {
-  const { state } = loadSaveWithRecovery(storage);
-  if (!state) return null;
-  return buildSaveSummary(state);
+  if (!storage) return null;
+  try {
+    const primaryRaw = storage.getItem(SAVE_KEY);
+    if (primaryRaw) {
+      const parsed = deserializeGameState(primaryRaw);
+      if (parsed) return buildSaveSummary(parsed);
+    }
+    const backupRaw = storage.getItem(SAVE_BACKUP_KEY);
+    if (backupRaw) {
+      const parsed = deserializeGameState(backupRaw);
+      if (parsed) return buildSaveSummary(parsed);
+    }
+  } catch {
+    // Non-fatal summary read failure
+  }
+  return null;
 }
 
 function slotStorageKey(slotId: SaveSlotId): string {

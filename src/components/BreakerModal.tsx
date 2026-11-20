@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Zap, ShieldCheck, AlertTriangle } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Zap, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { GameModal } from './GameModal';
 
@@ -31,12 +31,15 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
   onClose,
 }) => {
   const [fuseInserted, setFuseInserted] = useState(alreadyFixed);
-  const [switches, setSwitches] = useState<Record<string, boolean>>(() => ({
+  const initialSwitches = {
     lights: true,
     boiler: true,
     vent: !alreadyFixed,
     bypass: alreadyFixed,
-  }));
+  };
+  const [switches, setSwitches] = useState<Record<string, boolean>>(initialSwitches);
+  const switchesRef = useRef<Record<string, boolean>>(initialSwitches);
+  const solvedEmittedRef = useRef(alreadyFixed);
 
   const totalAmps = BREAKER_SWITCHES.reduce(
     (sum, sw) => sum + (switches[sw.id] ? sw.amps : 0),
@@ -45,34 +48,72 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
   const overloaded = totalAmps > 20;
   const ventCleared = fuseInserted && !switches.vent && switches.bypass && !overloaded;
 
-  const toggleSwitch = (id: string) => {
-    if (alreadyFixed || !fuseInserted) {
-      soundEngine.playSfx('locked');
-      return;
-    }
-    const next = { ...switches, [id]: !switches[id] };
-    const nextAmps = BREAKER_SWITCHES.reduce(
-      (sum, sw) => sum + (next[sw.id] ? sw.amps : 0),
-      0
-    );
-    setSwitches(next);
-    if (nextAmps > 20) {
-      soundEngine.playSfx('spark');
-    } else {
-      soundEngine.playSfx('flashlight');
-    }
+  const toggleSwitch = useCallback(
+    (id: string) => {
+      if (alreadyFixed || !fuseInserted || solvedEmittedRef.current) {
+        soundEngine.playSfx('locked');
+        return;
+      }
+      const next = { ...switchesRef.current, [id]: !switchesRef.current[id] };
+      switchesRef.current = next;
+      setSwitches(next);
 
-    if (fuseInserted && !next.vent && next.bypass && nextAmps <= 20) {
-      soundEngine.playSfx('unlock');
-      onSolved();
-    }
-  };
+      const nextAmps = BREAKER_SWITCHES.reduce(
+        (sum, sw) => sum + (next[sw.id] ? sw.amps : 0),
+        0
+      );
+      if (nextAmps > 20) {
+        soundEngine.playSfx('spark');
+      } else {
+        soundEngine.playSfx('flashlight');
+      }
 
-  const handleInsertFuse = () => {
+      if (fuseInserted && !next.vent && next.bypass && nextAmps <= 20) {
+        solvedEmittedRef.current = true;
+        soundEngine.playSfx('unlock');
+        onSolved();
+      }
+    },
+    [alreadyFixed, fuseInserted, onSolved]
+  );
+
+  const handleInsertFuse = useCallback(() => {
     if (!hasFuse || fuseInserted) return;
     soundEngine.playSfx('pickup');
     setFuseInserted(true);
-  };
+  }, [fuseInserted, hasFuse]);
+
+  const handleReset = useCallback(() => {
+    if (alreadyFixed || !fuseInserted || solvedEmittedRef.current) return;
+    soundEngine.playUiSfx('cancel');
+    const resetState = {
+      lights: true,
+      boiler: true,
+      vent: true,
+      bypass: false,
+    };
+    switchesRef.current = resetState;
+    setSwitches(resetState);
+  }, [alreadyFixed, fuseInserted]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key >= '1' && e.key <= '4') {
+        const sw = BREAKER_SWITCHES[Number(e.key) - 1];
+        if (sw) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSwitch(sw.id);
+        }
+      } else if (e.key === 'Enter' && !fuseInserted && hasFuse) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleInsertFuse();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fuseInserted, handleInsertFuse, hasFuse, toggleSwitch]);
 
   return (
     <GameModal
@@ -143,7 +184,7 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
         </div>
 
         <div className="space-y-2 mb-4">
-          {BREAKER_SWITCHES.map((sw) => {
+          {BREAKER_SWITCHES.map((sw, idx) => {
             const on = switches[sw.id];
             return (
               <button
@@ -160,6 +201,7 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
                 }`}
               >
                 <span>
+                  <span className="font-mono-ui text-[#6b7f96] mr-1.5">[{idx + 1}]</span>
                   {sw.label} <span className="text-[#788a9c]">({sw.amps}A)</span>
                 </span>
                 <span
@@ -176,16 +218,16 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
           })}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#25303f] pt-3 text-xs">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#25303f] pt-3 text-xs">
+          <div className="flex items-center gap-2 min-w-0" aria-live="polite">
             {overloaded ? (
               <>
-                <AlertTriangle className="w-4 h-4 text-[#ff6b6b]" />
+                <AlertTriangle className="w-4 h-4 text-[#ff6b6b] shrink-0" />
                 <span className="text-[#ff7a7a]">Перегрузка цепи: {totalAmps}A / 20A</span>
               </>
             ) : ventCleared || alreadyFixed ? (
               <>
-                <ShieldCheck className="w-4 h-4 text-[#6ee097]" />
+                <ShieldCheck className="w-4 h-4 text-[#6ee097] shrink-0" />
                 <span className="text-[#87ebb0]">Вентиляция обесточена — путь открыт!</span>
               </>
             ) : (
@@ -194,17 +236,29 @@ export const BreakerModal: React.FC<BreakerModalProps> = ({
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className={`px-3 py-1.5 border text-xs cursor-pointer ${
-              ventCleared || alreadyFixed
-                ? 'bg-[#173626] hover:bg-[#1f4733] border-[#4ca674] text-[#b8f5cd] font-semibold'
-                : 'bg-[#141c27] hover:bg-[#1f2b3b] border-[#324054] text-[#d8e2ec]'
-            }`}
-          >
-            {ventCleared || alreadyFixed ? 'Закрыть и пройти' : 'Закрыть'}
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            {fuseInserted && !alreadyFixed && !ventCleared && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="flex items-center gap-1 px-2.5 py-1.5 border border-[#2c3847] bg-[#0d131b] hover:bg-[#16202e] text-xs text-[#9cb0c4] cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Сброс
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-3 py-1.5 border text-xs cursor-pointer ${
+                ventCleared || alreadyFixed
+                  ? 'bg-[#173626] hover:bg-[#1f4733] border-[#4ca674] text-[#b8f5cd] font-semibold'
+                  : 'bg-[#141c27] hover:bg-[#1f2b3b] border-[#324054] text-[#d8e2ec]'
+              }`}
+            >
+              {ventCleared || alreadyFixed ? 'Закрыть и пройти' : 'Закрыть'}
+            </button>
+          </div>
         </div>
     </GameModal>
   );

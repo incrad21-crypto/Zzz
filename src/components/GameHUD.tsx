@@ -11,6 +11,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { ActiveRadioSignalSnapshot } from '../game/controllers/simulationStep';
+import { isKeyBoundToAction } from '../game/controllers/inputController';
 import { ALL_NOTES } from '../game/content';
 import { formatKeyCode } from '../game/saveManager';
 import {
@@ -178,6 +179,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const kUp = formatKeyCode(keyBindings.up);
   const kLeft = formatKeyCode(keyBindings.left);
   const kRight = formatKeyCode(keyBindings.right);
+  const muteKeySuffix = isKeyBoundToAction('KeyM', keyBindings) ? '' : ' [M]';
 
   return (
     <div
@@ -390,8 +392,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={hud.muted ? 'Включить звук (M)' : 'Выключить звук (M)'}
-                title="Звук [M]"
+                aria-label={hud.muted ? `Включить звук${muteKeySuffix}` : `Выключить звук${muteKeySuffix}`}
+                title={hud.muted ? `Включить звук${muteKeySuffix}` : `Выключить звук${muteKeySuffix}`}
                 onClick={(e) => {
                   e.currentTarget.blur();
                   onToggleMute();
@@ -446,8 +448,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <div className="space-y-2 text-xs">
             <button
               type="button"
+              data-finale-choice="awakening"
               onClick={() => onChooseEnding('awakening')}
-              className="w-full text-left px-3.5 py-2.5 bg-[#1a0a0d] hover:bg-[#2a1116] border border-[#6e2a33] text-[#f2d0d4] cursor-pointer transition-colors"
+              className="w-full text-left px-3.5 py-2.5 bg-[#1a0a0d] hover:bg-[#2a1116] focus:outline-2 focus:outline-[#ff858d] border border-[#6e2a33] text-[#f2d0d4] cursor-pointer transition-colors"
             >
               <span className="text-[#ff858d] mr-2 font-mono-ui">[1]</span>
               <span className="font-semibold text-[13px]">Позволить пробуждение</span>
@@ -458,8 +461,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
             <button
               type="button"
+              data-finale-choice="liberation"
               onClick={() => onChooseEnding('liberation')}
-              className="w-full text-left px-3.5 py-2.5 bg-[#0c1622] hover:bg-[#132538] border border-[#3c658a] text-[#d6ecff] cursor-pointer transition-colors"
+              className="w-full text-left px-3.5 py-2.5 bg-[#0c1622] hover:bg-[#132538] focus:outline-2 focus:outline-[#7cd4ff] border border-[#3c658a] text-[#d6ecff] cursor-pointer transition-colors"
             >
               <span className="text-[#7cd4ff] mr-2 font-mono-ui">[2]</span>
               <span className="font-semibold text-[13px]">Вырвать силовой контур</span>
@@ -470,11 +474,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
             <button
               type="button"
+              data-finale-choice="last_record"
               disabled={!hud.canUnlockLastRecord}
               onClick={() => onChooseEnding('last_record')}
               className={`w-full text-left px-3.5 py-2.5 border transition-colors ${
                 hud.canUnlockLastRecord
-                  ? 'bg-[#0a1c17] hover:bg-[#123027] border-[#3d8c6e] text-[#c7f5e1] cursor-pointer'
+                  ? 'bg-[#0a1c17] hover:bg-[#123027] focus:outline-2 focus:outline-[#7be8b8] border-[#3d8c6e] text-[#c7f5e1] cursor-pointer'
                   : 'bg-[#0b0e12] border-[#252c36] text-[#5e6a78] cursor-not-allowed'
               }`}
             >

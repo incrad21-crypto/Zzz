@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Keyboard, Settings, Volume2, VolumeX } from 'lucide-react';
-import { formatKeyCode, formatSaveTimestamp } from '../game/saveManager';
+import { soundEngine } from '../game/audio';
+import { formatKeyCode, formatSaveTimestamp, resetSettingsToDefault } from '../game/saveManager';
 import {
   DifficultyMode,
   GameSettings,
@@ -42,10 +43,25 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onPanelOpenChange,
 }) => {
   const [panel, setPanel] = useState<'none' | 'settings' | 'controls'>('none');
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     onPanelOpenChange?.(panel !== 'none');
+    if (panel !== 'settings') {
+      setConfirmReset(false);
+    }
   }, [panel, onPanelOpenChange]);
+
+  useEffect(() => {
+    if (panel === 'none') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        setPanel('none');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panel]);
 
   const sizes: { id: SubtitleSize; label: string }[] = [
     { id: 'small', label: 'Малый' },
@@ -81,7 +97,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const continueStamp = formatSaveTimestamp(saveSummary?.timestamp);
 
   return (
-    <div className="fixed inset-0 z-20 flex flex-col justify-between gap-3 p-6 md:px-12 md:py-7 pointer-events-none">
+    <div
+      data-title-screen="true"
+      className="fixed inset-0 z-20 flex flex-col justify-between gap-3 p-6 md:px-12 md:py-7 pointer-events-none"
+    >
       {/* Top-right sound toggle */}
       <div className="shrink-0 flex justify-end pointer-events-auto">
         <button
@@ -208,13 +227,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2">
                 {(
                   [
-                    { key: 'masterVolume', label: 'Общая громкость' },
-                    { key: 'ambienceVolume', label: 'Эмбиент и дождь' },
-                    { key: 'sfxVolume', label: 'Эффекты и шаги' },
-                    { key: 'voiceVolume', label: 'Голос и кассеты' },
+                    { key: 'masterVolume', label: 'Общая громкость', fallback: 0.78 },
+                    { key: 'ambienceVolume', label: 'Эмбиент и дождь', fallback: 0.82 },
+                    { key: 'musicVolume', label: 'Тревожный фон', fallback: 0.7 },
+                    { key: 'sfxVolume', label: 'Эффекты и шаги', fallback: 0.9 },
+                    { key: 'voiceVolume', label: 'Голос и кассеты', fallback: 0.92 },
+                    { key: 'uiVolume', label: 'Интерфейс', fallback: 0.85 },
                   ] as const
                 ).map((ch) => {
-                  const pct = Math.round(settings[ch.key] * 100);
+                  const pct = Math.round((settings[ch.key] ?? ch.fallback) * 100);
                   return (
                     <label key={ch.key} className="block">
                       <div className="flex items-center justify-between text-[11px] mb-0.5">
@@ -325,34 +346,39 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(
                 [
-                  { key: 'subtitleBg', label: 'Подложка субтитров' },
-                  { key: 'screenShake', label: 'Тряска камеры' },
-                  { key: 'reduceFlashes', label: 'Снизить вспышки' },
-                  { key: 'visualNoise', label: 'Помехи экрана' },
-                  { key: 'soundCaptions', label: 'Титры звуков' },
-                  { key: 'touchControls', label: 'Сенсорное управление' },
+                  { key: 'subtitleBg', label: 'Подложка субтитров', fallback: true },
+                  { key: 'screenShake', label: 'Тряска камеры', fallback: true },
+                  { key: 'reduceFlashes', label: 'Снизить вспышки', fallback: false },
+                  { key: 'reducedMotion', label: 'Щадящее движение', fallback: false },
+                  { key: 'visualNoise', label: 'Помехи экрана', fallback: true },
+                  { key: 'soundCaptions', label: 'Титры звуков', fallback: true },
+                  { key: 'gamepadVibration', label: 'Вибрация геймпада', fallback: true },
+                  { key: 'touchControls', label: 'Сенсорное управление', fallback: false },
                 ] as const
-              ).map((toggle) => (
-                <div
-                  key={toggle.key}
-                  className="flex items-center justify-between gap-2 border border-[#1a2432] bg-[#0b1018] px-2.5 py-1.5"
-                >
-                  <span className="text-[#95a6b8] truncate">{toggle.label}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onUpdateSettings({ ...settings, [toggle.key]: !settings[toggle.key] })
-                    }
-                    className={`px-2.5 py-0.5 border font-mono-ui shrink-0 cursor-pointer ${
-                      settings[toggle.key]
-                        ? 'border-[#4b85b3] bg-[#15283a] text-[#dceeff]'
-                        : 'border-[#2f3b4c] bg-[#10161f] text-[#8a98a8]'
-                    }`}
+              ).map((toggle) => {
+                const active = Boolean(settings[toggle.key] ?? toggle.fallback);
+                return (
+                  <div
+                    key={toggle.key}
+                    className="flex items-center justify-between gap-2 border border-[#1a2432] bg-[#0b1018] px-2.5 py-1.5"
                   >
-                    {settings[toggle.key] ? 'Вкл' : 'Выкл'}
-                  </button>
-                </div>
-              ))}
+                    <span className="text-[#95a6b8] truncate">{toggle.label}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings({ ...settings, [toggle.key]: !active })
+                      }
+                      className={`px-2.5 py-0.5 border font-mono-ui shrink-0 cursor-pointer ${
+                        active
+                          ? 'border-[#4b85b3] bg-[#15283a] text-[#dceeff]'
+                          : 'border-[#2f3b4c] bg-[#10161f] text-[#8a98a8]'
+                      }`}
+                    >
+                      {active ? 'Вкл' : 'Выкл'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
 
             {settings.touchControls && (
@@ -397,6 +423,68 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 </div>
               </div>
             )}
+
+            <div className="border border-[#1a2432] bg-[#0b1018] px-2.5 py-2 space-y-2">
+              <label className="block">
+                <div className="flex items-center justify-between text-[11px] mb-1">
+                  <span className="text-[#95a6b8]">Мёртвая зона стика геймпада</span>
+                  <span className="text-[#7cd4ff] font-mono-ui tabular-nums">
+                    {Math.round((settings.gamepadDeadzone ?? 0.28) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={8}
+                  max={50}
+                  step={2}
+                  value={Math.round((settings.gamepadDeadzone ?? 0.28) * 100)}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      gamepadDeadzone: Number(e.target.value) / 100,
+                    })
+                  }
+                  className="w-full accent-[#7cd4ff] cursor-pointer"
+                />
+              </label>
+
+              <div className="flex items-center justify-between gap-2 border-t border-[#16202e] pt-2">
+                <span className="text-[#95a6b8]">Сбросить настройки к стандартным</span>
+                {confirmReset ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiSfx('confirm');
+                        setConfirmReset(false);
+                        onUpdateSettings(resetSettingsToDefault());
+                      }}
+                      className="px-2 py-0.5 border border-[#8f5236] bg-[#2a1710] hover:bg-[#3b2016] text-[#ffd7c2] cursor-pointer"
+                    >
+                      Подтвердить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmReset(false)}
+                      className="px-2 py-0.5 border border-[#2f3b4c] bg-[#10161f] hover:bg-[#18212f] text-[#9eb0c2] cursor-pointer"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playUiSfx('click');
+                      setConfirmReset(true);
+                    }}
+                    className="px-2.5 py-0.5 border border-[#3a4a60] bg-[#111924] hover:bg-[#192434] text-[#cfe0f0] shrink-0 cursor-pointer"
+                  >
+                    Сброс
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

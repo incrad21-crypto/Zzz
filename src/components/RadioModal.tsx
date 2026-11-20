@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Radio, ChevronLeft, ChevronRight } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { GameModal } from './GameModal';
@@ -41,7 +41,9 @@ export const RadioModal: React.FC<RadioModalProps> = ({
   onTuneSecret,
   onClose,
 }) => {
-  const [freqTenths, setFreqTenths] = useState(alreadyTuned ? 1048 : 960);
+  const initialFreq = alreadyTuned ? 1048 : 960;
+  const [freqTenths, setFreqTenths] = useState(initialFreq);
+  const freqRef = useRef(initialFreq);
 
   const activeStation = STATIONS.find((s) => Math.abs(s.freq - freqTenths) <= 2) ?? null;
   const closestDist = Math.min(...STATIONS.map((s) => Math.abs(s.freq - freqTenths)));
@@ -49,19 +51,19 @@ export const RadioModal: React.FC<RadioModalProps> = ({
 
   const stepFreq = useCallback(
     (delta: number) => {
-      setFreqTenths((prev) => {
-        const next = Math.max(880, Math.min(1080, prev + delta));
-        const hit = STATIONS.find((s) => Math.abs(s.freq - next) <= 2);
-        if (hit) {
-          soundEngine.playSfx(hit.isSecret ? 'robot' : 'pickup');
-          if (hit.isSecret) {
-            onTuneSecret();
-          }
-        } else {
-          soundEngine.playSfx('spark');
+      const next = Math.max(880, Math.min(1080, freqRef.current + delta));
+      freqRef.current = next;
+      setFreqTenths(next);
+
+      const hit = STATIONS.find((s) => Math.abs(s.freq - next) <= 2);
+      if (hit) {
+        soundEngine.playSfx(hit.isSecret ? 'robot' : 'pickup');
+        if (hit.isSecret) {
+          onTuneSecret();
         }
-        return next;
-      });
+      } else {
+        soundEngine.playSfx('spark');
+      }
     },
     [onTuneSecret]
   );
@@ -77,6 +79,14 @@ export const RadioModal: React.FC<RadioModalProps> = ({
         e.preventDefault();
         e.stopPropagation();
         stepFreq(step);
+      } else if (e.key === 'PageDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        stepFreq(-12);
+      } else if (e.key === 'PageUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        stepFreq(12);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -209,7 +219,7 @@ export const RadioModal: React.FC<RadioModalProps> = ({
           </div>
         </div>
 
-        <div className="border border-[#243040] bg-[#080c12] p-3 min-h-[82px] mb-4">
+        <div aria-live="polite" className="border border-[#243040] bg-[#080c12] p-3 min-h-[82px] mb-4">
           {activeStation ? (
             <>
               <div className="text-[11px] uppercase tracking-wider text-[#7fe0a5] mb-1">

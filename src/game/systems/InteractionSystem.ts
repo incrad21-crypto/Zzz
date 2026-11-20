@@ -16,7 +16,7 @@ import {
   ShadowBehavior,
 } from '../types';
 import { FOREST_GROUND_Y, getHouseFloorY, WORLD_INTERACTABLES } from '../world';
-import { getDifficultyProfile, toggleHidingSpot } from './MovementSystem';
+import { getDifficultyProfile, getHorizontalBounds, toggleHidingSpot } from './MovementSystem';
 import { startFinale } from './ProgressionSystem';
 
 function clampDt(dt: number): number {
@@ -644,28 +644,47 @@ export function updateShadowEncounter(
 
   if (!sh.active) {
     sh.cooldown = Math.max(0, sh.cooldown - dt);
+    sh.hideTimer = 0;
     if (sh.cooldown <= 0 && (state.player.floor === 2 || state.player.floor === 3 || state.player.floor === 0)) {
+      const bounds = getHorizontalBounds(state);
+      const minSpawnX = bounds.minX + 18;
+      const maxSpawnX = bounds.maxX - 18;
       const clueX = findUndiscoveredFloorClueX(state);
       const roll = Math.abs(Math.sin(state.playTimeSeconds * 3.7 + state.player.x * 0.05));
-      if (clueX !== null && !sh.guideHintShown && roll > 0.72) {
+      if (
+        clueX !== null &&
+        clueX >= minSpawnX &&
+        clueX <= maxSpawnX &&
+        !sh.guideHintShown &&
+        roll > 0.72
+      ) {
         sh.active = true;
         sh.floor = state.player.floor;
         sh.x = clueX;
         sh.exposure = 0;
+        sh.hideTimer = 0;
         sh.behavior = 'guide';
         sh.guideTargetX = clueX;
         sh.guideHintShown = true;
         return { startled: false, evaded: false, spawned: true, guided: true, behavior: 'guide' };
       }
 
-      const targetX = state.player.x + state.player.facing * 150;
-      if (targetX > 110 && targetX < 960) {
+      const rawTarget = state.player.x + state.player.facing * 150;
+      const fallbackTarget = state.player.x - state.player.facing * 150;
+      const targetX =
+        rawTarget >= minSpawnX && rawTarget <= maxSpawnX
+          ? rawTarget
+          : fallbackTarget >= minSpawnX && fallbackTarget <= maxSpawnX
+            ? fallbackTarget
+            : null;
+      if (targetX !== null && Math.abs(targetX - state.player.x) >= 95) {
         const behaviors: ShadowBehavior[] = ['stalk', 'observe', 'light_react'];
         const picked = behaviors[Math.floor(roll * 3) % behaviors.length] ?? 'stalk';
         sh.active = true;
         sh.floor = state.player.floor;
         sh.x = targetX;
         sh.exposure = 0;
+        sh.hideTimer = 0;
         sh.behavior = picked;
         return { startled: false, evaded: false, spawned: true, guided: false, behavior: picked };
       }
@@ -678,25 +697,34 @@ export function updateShadowEncounter(
     if (state.player.floor !== sh.floor || dist < 54 || dist > 300) {
       sh.active = false;
       sh.exposure = 0;
+      sh.hideTimer = 0;
       sh.cooldown = Math.max(12, 22 + diff.shadowCooldownDelta);
       return { startled: false, evaded: false, spawned: false, guided: false, behavior: 'guide' };
     }
     return { startled: false, evaded: false, spawned: false, guided: false, behavior: 'guide' };
   }
 
-  if (state.player.floor !== sh.floor || Math.abs(state.player.x - sh.x) > 260) {
+  const bounds = getHorizontalBounds(state);
+  if (
+    state.player.floor !== sh.floor ||
+    Math.abs(state.player.x - sh.x) > 260 ||
+    sh.x < bounds.minX ||
+    sh.x > bounds.maxX
+  ) {
     sh.active = false;
     sh.exposure = 0;
+    sh.hideTimer = 0;
     sh.cooldown = Math.max(12, 18 + diff.shadowCooldownDelta);
     return { startled: false, evaded: true, spawned: false, guided: false, behavior: sh.behavior };
   }
 
   if (state.player.isHiding) {
     sh.exposure = Math.max(0, sh.exposure - dt * 1.2);
-    sh.cooldown -= dt * 1.4;
-    if (sh.cooldown < -1.4) {
+    sh.hideTimer = (sh.hideTimer ?? 0) + dt * 1.4;
+    if (sh.hideTimer >= 1.4) {
       sh.active = false;
       sh.exposure = 0;
+      sh.hideTimer = 0;
       sh.cooldown = Math.max(12, 25 + diff.shadowCooldownDelta);
       return { startled: false, evaded: true, spawned: false, guided: false, behavior: sh.behavior };
     }
@@ -710,7 +738,7 @@ export function updateShadowEncounter(
 
   if (sh.behavior === 'stalk' && !facingToward && dist > 68) {
     const stepDir = state.player.x > sh.x ? 1 : -1;
-    sh.x += stepDir * 14 * dt;
+    sh.x = Math.max(bounds.minX + 12, Math.min(bounds.maxX - 12, sh.x + stepDir * 14 * dt));
   }
 
   const shiningOnIt =
@@ -722,10 +750,12 @@ export function updateShadowEncounter(
 
   if (shiningOnIt) {
     const baseRate = sh.behavior === 'light_react' ? 0.96 : sh.behavior === 'observe' ? 0.55 : 0.72;
+    sh.hideTimer = 0;
     sh.exposure += dt * baseRate * diff.shadowExposureScale;
     if (sh.exposure >= 1) {
       sh.active = false;
       sh.exposure = 0;
+      sh.hideTimer = 0;
       sh.cooldown = Math.max(12, 26 + diff.shadowCooldownDelta);
       state.player.startledTimer = 0.65;
       state.player.stamina = Math.max(0, state.player.stamina - 35);
@@ -735,10 +765,11 @@ export function updateShadowEncounter(
   } else {
     sh.exposure = Math.max(0, sh.exposure - dt * 0.45);
     if (state.player.isCrouching || !state.player.flashlightOn) {
-      sh.cooldown -= dt;
-      if (dist < 64 && sh.cooldown < -1.1) {
+      sh.hideTimer = (sh.hideTimer ?? 0) + dt;
+      if (dist < 64 && sh.hideTimer >= 1.1) {
         sh.active = false;
         sh.exposure = 0;
+        sh.hideTimer = 0;
         sh.cooldown = Math.max(12, 24 + diff.shadowCooldownDelta);
         return { startled: false, evaded: true, spawned: false, guided: false, behavior: sh.behavior };
       }

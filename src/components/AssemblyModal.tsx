@@ -28,6 +28,7 @@ export const AssemblyModal: React.FC<AssemblyModalProps> = ({
   onClose,
 }) => {
   const [assemblingPartId, setAssemblingPartId] = useState<PartId | null>(null);
+  const [hoveredPartId, setHoveredPartId] = useState<PartId | null>(null);
   const installTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -282,6 +283,22 @@ export const AssemblyModal: React.FC<AssemblyModalProps> = ({
                 />
               </g>
 
+              {hoveredPartId && hoveredPartId !== assemblingPartId && (
+                <g className="pointer-events-none">
+                  <circle
+                    cx={PART_HIGHLIGHT_ZONES[hoveredPartId].cx}
+                    cy={PART_HIGHLIGHT_ZONES[hoveredPartId].cy}
+                    r={PART_HIGHLIGHT_ZONES[hoveredPartId].r}
+                    fill="#7cd4ff"
+                    fillOpacity="0.08"
+                    stroke="#7cd4ff"
+                    strokeOpacity="0.6"
+                    strokeWidth="1.2"
+                    strokeDasharray="3 2"
+                  />
+                </g>
+              )}
+
               {assemblingPartId && (
                 <g className="pointer-events-none">
                   <circle
@@ -306,7 +323,7 @@ export const AssemblyModal: React.FC<AssemblyModalProps> = ({
                 </g>
               )}
             </svg>
-            <div className="text-xs text-[#90a1b5] mt-2 font-mono-ui text-center">
+            <div aria-live="polite" className="text-xs text-[#90a1b5] mt-2 font-mono-ui text-center">
               {count === 0 && 'Индикатор: едва тлеет синим'}
               {count > 0 && count <= 3 && 'Индикатор: синий · приводы вздрагивают'}
               {count >= 4 && count <= 6 && 'Индикатор: тревожный фиолетовый отблеск'}
@@ -329,8 +346,14 @@ export const AssemblyModal: React.FC<AssemblyModalProps> = ({
               return (
                 <div
                   key={part.id}
-                  className={`flex items-center justify-between gap-3 px-3.5 py-2.5 border ${
-                    isInstalled
+                  onMouseEnter={() => setHoveredPartId(part.id)}
+                  onMouseLeave={() => setHoveredPartId((prev) => (prev === part.id ? null : prev))}
+                  onFocus={() => setHoveredPartId(part.id)}
+                  onBlur={() => setHoveredPartId((prev) => (prev === part.id ? null : prev))}
+                  className={`flex items-center justify-between gap-3 px-3.5 py-2.5 border transition-colors ${
+                    hoveredPartId === part.id
+                      ? 'border-[#7cd4ff] bg-[#162230]'
+                      : isInstalled
                       ? 'bg-[#101923] border-[#2f4b66]'
                       : isOwned
                       ? 'bg-[#141c24] border-[#4e779c]'

@@ -1,3 +1,4 @@
+import { gameDiagnostics } from './diagnostics';
 import { AudioTapeId, EndingId, InspectTargetId, PartId } from './types';
 
 export interface GameEventMap {
@@ -44,7 +45,11 @@ export class GameEventBus {
     this.emitDepth += 1;
     try {
       for (const listener of [...set]) {
-        listener(payload);
+        try {
+          listener(payload);
+        } catch (err) {
+          gameDiagnostics.recordError(`eventBus:${event}`, err, 'warn');
+        }
       }
     } finally {
       this.emitDepth -= 1;

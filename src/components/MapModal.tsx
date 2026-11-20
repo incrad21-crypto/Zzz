@@ -11,6 +11,7 @@ interface MapModalProps {
   collectedKeys: KeyItemId[];
   discoveredSecrets: string[];
   breakerFixed: boolean;
+  mapKeyLabel?: string;
   onClose: () => void;
 }
 
@@ -23,6 +24,7 @@ export const MapModal: React.FC<MapModalProps> = ({
   collectedKeys,
   discoveredSecrets,
   breakerFixed,
+  mapKeyLabel = 'K',
   onClose,
 }) => {
   const [selectedFloor, setSelectedFloor] = useState<number>(currentFloor);
@@ -101,7 +103,11 @@ export const MapModal: React.FC<MapModalProps> = ({
                   {getFloorName(fl)}
                 </button>
 
-                <div className="flex-1 grid grid-cols-5 gap-1.5">
+                <div
+                  className={`flex-1 grid gap-1.5 ${
+                    rooms.length <= 3 ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-5'
+                  }`}
+                >
                   {rooms.map((room) => {
                     const isSecretHidden =
                       room.isSecret &&
@@ -215,7 +221,7 @@ export const MapModal: React.FC<MapModalProps> = ({
             onClick={onClose}
             className="px-3.5 py-1.5 border border-[#2c4057] hover:bg-[#132131] text-xs text-[#d5e3f0] cursor-pointer"
           >
-            Esc / K — закрыть
+            Esc / {mapKeyLabel} — закрыть
           </button>
         </div>
     </GameModal>

@@ -1,6 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Download, HardDrive, Keyboard, Save, Trash2, Upload } from 'lucide-react';
-import { formatSaveTimestamp, SaveSlotId, SaveSlotInfo } from '../game/saveManager';
+import { Download, HardDrive, Keyboard, RotateCcw, Save, Trash2, Upload } from 'lucide-react';
+import { soundEngine } from '../game/audio';
+import {
+  formatSaveTimestamp,
+  resetSettingsToDefault,
+  SaveSlotId,
+  SaveSlotInfo,
+} from '../game/saveManager';
 import {
   DifficultyMode,
   GameSettings,
@@ -44,6 +50,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   onExitToTitle,
 }) => {
   const [subPanel, setSubPanel] = useState<'settings' | 'keybinds' | 'saves'>('settings');
+  const [confirmAction, setConfirmAction] = useState<
+    null | 'restart' | 'exit' | 'reset_settings' | { deleteSlot: SaveSlotId }
+  >(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sizes: { id: SubtitleSize; label: string }[] = [
@@ -89,13 +98,16 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   ];
 
   const mixerChannels: {
-    key: 'masterVolume' | 'ambienceVolume' | 'sfxVolume' | 'voiceVolume';
+    key: 'masterVolume' | 'ambienceVolume' | 'musicVolume' | 'sfxVolume' | 'voiceVolume' | 'uiVolume';
     label: string;
+    fallback: number;
   }[] = [
-    { key: 'masterVolume', label: 'Общая громкость' },
-    { key: 'ambienceVolume', label: 'Эмбиент и дождь' },
-    { key: 'sfxVolume', label: 'Эффекты и шаги' },
-    { key: 'voiceVolume', label: 'Голос и кассеты' },
+    { key: 'masterVolume', label: 'Общая громкость', fallback: 0.78 },
+    { key: 'ambienceVolume', label: 'Эмбиент и дождь', fallback: 0.82 },
+    { key: 'musicVolume', label: 'Тревожный фон', fallback: 0.7 },
+    { key: 'sfxVolume', label: 'Эффекты и шаги', fallback: 0.9 },
+    { key: 'voiceVolume', label: 'Голос и кассеты', fallback: 0.92 },
+    { key: 'uiVolume', label: 'Интерфейс', fallback: 0.85 },
   ];
 
   return (
@@ -141,7 +153,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
     >
 
         {subPanel === 'keybinds' ? (
-          <div className="mb-4">
+          <div className="mb-4 max-h-[min(56vh,420px)] overflow-y-auto pr-1">
             <KeyBindingsEditor
               bindings={settings.keyBindings}
               onChange={(nextBindings) =>
@@ -150,7 +162,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             />
           </div>
         ) : subPanel === 'saves' ? (
-          <div className="mb-4 space-y-3 text-xs font-ui">
+          <div className="mb-4 max-h-[min(56vh,420px)] overflow-y-auto pr-1 space-y-3 text-xs font-ui">
             <div className="flex flex-wrap items-center justify-between gap-2 border border-[#1f2936] bg-[#0b1018] p-2.5">
               <div>
                 <div className="font-medium text-[#dce6f0]">Быстрое сохранение</div>
@@ -160,7 +172,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               </div>
               <button
                 type="button"
-                onClick={onSaveNow}
+                onClick={() => {
+                  soundEngine.playUiSfx('confirm');
+                  onSaveNow();
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-[#44759b] bg-[#132638] hover:bg-[#1a354d] text-[#d9f0ff] cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />
@@ -172,55 +187,96 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               <div className="text-[10px] uppercase tracking-wider text-[#6f859c]">
                 Слоты сохранения
               </div>
-              {saveSlots.map((slot) => (
-                <div
-                  key={slot.slotId}
-                  className="flex flex-wrap items-center justify-between gap-2 border border-[#1c2430] bg-[#0a0f16] px-2.5 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium text-[#d4e0ec]">{slot.label}</div>
-                    {slot.summary ? (
-                      <div className="text-[11px] text-[#7c94ad] truncate">
-                        {slot.summary.roomName} · {slot.summary.partsInstalled}/8 дет. ·{' '}
-                        {slot.summary.totalNotesFound}/{slot.summary.totalNotes} зап.
-                        {formatSaveTimestamp(slot.summary.timestamp)
-                          ? ` · ${formatSaveTimestamp(slot.summary.timestamp)}`
-                          : ''}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-[#566473]">Пустой слот</div>
-                    )}
+              {saveSlots.map((slot) => {
+                const pendingDelete =
+                  typeof confirmAction === 'object' &&
+                  confirmAction !== null &&
+                  'deleteSlot' in confirmAction &&
+                  confirmAction.deleteSlot === slot.slotId;
+                return (
+                  <div
+                    key={slot.slotId}
+                    className="flex flex-wrap items-center justify-between gap-2 border border-[#1c2430] bg-[#0a0f16] px-2.5 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-[#d4e0ec]">{slot.label}</div>
+                      {slot.summary ? (
+                        <div className="text-[11px] text-[#7c94ad] truncate">
+                          {slot.summary.roomName} · {slot.summary.partsInstalled}/8 дет. ·{' '}
+                          {slot.summary.totalNotesFound}/{slot.summary.totalNotes} зап.
+                          {formatSaveTimestamp(slot.summary.timestamp)
+                            ? ` · ${formatSaveTimestamp(slot.summary.timestamp)}`
+                            : ''}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-[#566473]">Пустой слот</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmAction(null);
+                          soundEngine.playUiSfx('confirm');
+                          onSaveToSlot(slot.slotId);
+                        }}
+                        className="px-2 py-1 border border-[#304256] bg-[#111924] hover:bg-[#1a2636] text-[#cfe0f0] cursor-pointer"
+                      >
+                        Записать
+                      </button>
+                      {slot.summary && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmAction(null);
+                              soundEngine.playUiSfx('click');
+                              onLoadFromSlot(slot.slotId);
+                            }}
+                            className="px-2 py-1 border border-[#3b6a56] bg-[#0e2018] hover:bg-[#153124] text-[#b9f0d6] cursor-pointer"
+                          >
+                            Загрузить
+                          </button>
+                          {pendingDelete ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  soundEngine.playUiSfx('cancel');
+                                  setConfirmAction(null);
+                                  onDeleteSlot(slot.slotId);
+                                }}
+                                className="px-2 py-1 border border-[#963944] bg-[#301016] hover:bg-[#47161f] text-[#ffd6da] cursor-pointer"
+                              >
+                                Удалить?
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmAction(null)}
+                                className="px-1.5 py-1 border border-[#2c3747] bg-[#10161f] text-[#9cb0c4] cursor-pointer"
+                              >
+                                Нет
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`Удалить ${slot.label}`}
+                              onClick={() => {
+                                soundEngine.playUiSfx('click');
+                                setConfirmAction({ deleteSlot: slot.slotId });
+                              }}
+                              className="p-1 border border-[#4a262c] bg-[#1a0d10] hover:bg-[#2a151a] text-[#e89ea5] cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => onSaveToSlot(slot.slotId)}
-                      className="px-2 py-1 border border-[#304256] bg-[#111924] hover:bg-[#1a2636] text-[#cfe0f0] cursor-pointer"
-                    >
-                      Записать
-                    </button>
-                    {slot.summary && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => onLoadFromSlot(slot.slotId)}
-                          className="px-2 py-1 border border-[#3b6a56] bg-[#0e2018] hover:bg-[#153124] text-[#b9f0d6] cursor-pointer"
-                        >
-                          Загрузить
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Удалить ${slot.label}`}
-                          onClick={() => onDeleteSlot(slot.slotId)}
-                          className="p-1 border border-[#4a262c] bg-[#1a0d10] hover:bg-[#2a151a] text-[#e89ea5] cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border border-[#1f2936] bg-[#0b1018] p-2.5">
@@ -261,7 +317,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             </div>
           </div>
         ) : (
-          <div className="space-y-2.5 mb-4 text-xs font-ui">
+          <div className="space-y-2.5 mb-4 max-h-[min(56vh,420px)] overflow-y-auto pr-1 text-xs font-ui">
             {/* Sound master mute */}
             <div className="flex items-center justify-between">
               <span className="text-[#9eacb9]">Звук и эмбиент</span>
@@ -281,7 +337,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
                 {mixerChannels.map((ch) => {
-                  const pct = Math.round(settings[ch.key] * 100);
+                  const pct = Math.round((settings[ch.key] ?? ch.fallback) * 100);
                   return (
                     <label key={ch.key} className="block">
                       <div className="flex items-center justify-between text-[11px] mb-0.5">
@@ -468,6 +524,60 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 </button>
               </div>
 
+              <div className="flex items-center justify-between border border-[#1a222e] bg-[#0a0f16] px-2.5 py-1.5">
+                <span className="text-[#9eacb9]">Щадящее движение</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateSettings({ ...settings, reducedMotion: !settings.reducedMotion })
+                  }
+                  className="px-2.5 py-0.5 border border-[#2f3b4c] bg-[#10161f] hover:bg-[#18212f] text-[#dce4ec] cursor-pointer"
+                >
+                  {settings.reducedMotion ? 'Вкл' : 'Выкл'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between border border-[#1a222e] bg-[#0a0f16] px-2.5 py-1.5">
+                <span className="text-[#9eacb9]">Вибрация геймпада</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      gamepadVibration: !(settings.gamepadVibration ?? true),
+                    })
+                  }
+                  className="px-2.5 py-0.5 border border-[#2f3b4c] bg-[#10161f] hover:bg-[#18212f] text-[#dce4ec] cursor-pointer"
+                >
+                  {(settings.gamepadVibration ?? true) ? 'Вкл' : 'Выкл'}
+                </button>
+              </div>
+
+              <div className="sm:col-span-2 border border-[#1a222e] bg-[#0a0f16] px-2.5 py-1.5">
+                <label className="block">
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="text-[#9eacb9]">Мёртвая зона стика геймпада</span>
+                    <span className="text-[#7cd4ff] font-mono-ui tabular-nums">
+                      {Math.round((settings.gamepadDeadzone ?? 0.28) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={8}
+                    max={50}
+                    step={2}
+                    value={Math.round((settings.gamepadDeadzone ?? 0.28) * 100)}
+                    onChange={(e) =>
+                      onUpdateSettings({
+                        ...settings,
+                        gamepadDeadzone: Number(e.target.value) / 100,
+                      })
+                    }
+                    className="w-full accent-[#7cd4ff] cursor-pointer"
+                  />
+                </label>
+              </div>
+
               <div className="sm:col-span-2 flex items-center justify-between border border-[#1a222e] bg-[#0a0f16] px-2.5 py-1.5">
                 <span className="text-[#9eacb9]">Титры звуков (направление аномалий)</span>
                 <button
@@ -534,6 +644,44 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                   </div>
                 )}
               </div>
+
+              <div className="sm:col-span-2 flex items-center justify-between border border-[#1a222e] bg-[#0a0f16] px-2.5 py-1.5">
+                <span className="text-[#9eacb9]">Сбросить все настройки к стандартным</span>
+                {confirmAction === 'reset_settings' ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playUiSfx('confirm');
+                        setConfirmAction(null);
+                        onUpdateSettings(resetSettingsToDefault());
+                      }}
+                      className="px-2.5 py-0.5 border border-[#8f5236] bg-[#2a1710] hover:bg-[#3b2016] text-[#ffd7c2] cursor-pointer"
+                    >
+                      Подтвердить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmAction(null)}
+                      className="px-2 py-0.5 border border-[#2f3b4c] bg-[#10161f] text-[#9cb0c4] cursor-pointer"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playUiSfx('click');
+                      setConfirmAction('reset_settings');
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-0.5 border border-[#2f3b4c] bg-[#10161f] hover:bg-[#18212f] text-[#dce4ec] cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Сбросить</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -541,27 +689,87 @@ export const PauseModal: React.FC<PauseModalProps> = ({
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={onResume}
+            onClick={() => {
+              soundEngine.playUiSfx('confirm');
+              onResume();
+            }}
             className="w-full py-2 bg-[#c4d3e3] hover:bg-white text-[#070a0f] font-semibold text-sm cursor-pointer"
           >
             Продолжить [Esc]
           </button>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={onRestart}
-              className="py-2 bg-[#111722] hover:bg-[#192232] border border-[#2c3747] text-xs text-[#d5dee8] cursor-pointer"
-            >
-              Начать сначала
-            </button>
-            <button
-              type="button"
-              onClick={onExitToTitle}
-              className="py-2 bg-[#0b0e14] hover:bg-[#141a24] border border-[#222a36] text-xs text-[#9ba8b5] cursor-pointer"
-            >
-              В главное меню
-            </button>
-          </div>
+
+          {confirmAction === 'restart' ? (
+            <div className="flex items-center justify-between gap-2 border border-[#753139] bg-[#1a0c10] px-3 py-2 text-xs">
+              <span className="text-[#f0bcc2]">Начать игру сначала? Несохранённый прогресс потеряется.</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playUiSfx('confirm');
+                    setConfirmAction(null);
+                    onRestart();
+                  }}
+                  className="px-2.5 py-1 border border-[#963944] bg-[#361118] hover:bg-[#4d1721] text-white cursor-pointer"
+                >
+                  Да, сначала
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-2.5 py-1 border border-[#2c3747] bg-[#10161f] text-[#b4c2d1] cursor-pointer"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          ) : confirmAction === 'exit' ? (
+            <div className="flex items-center justify-between gap-2 border border-[#753139] bg-[#1a0c10] px-3 py-2 text-xs">
+              <span className="text-[#f0bcc2]">Выйти в главное меню?</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playUiSfx('cancel');
+                    setConfirmAction(null);
+                    onExitToTitle();
+                  }}
+                  className="px-2.5 py-1 border border-[#963944] bg-[#361118] hover:bg-[#4d1721] text-white cursor-pointer"
+                >
+                  Выйти
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-2.5 py-1 border border-[#2c3747] bg-[#10161f] text-[#b4c2d1] cursor-pointer"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playUiSfx('click');
+                  setConfirmAction('restart');
+                }}
+                className="py-2 bg-[#111722] hover:bg-[#192232] border border-[#2c3747] text-xs text-[#d5dee8] cursor-pointer"
+              >
+                Начать сначала
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playUiSfx('click');
+                  setConfirmAction('exit');
+                }}
+                className="py-2 bg-[#0b0e14] hover:bg-[#141a24] border border-[#222a36] text-xs text-[#9ba8b5] cursor-pointer"
+              >
+                В главное меню
+              </button>
+            </div>
+          )}
         </div>
     </GameModal>
   );

@@ -20,6 +20,8 @@ interface InventoryModalProps {
   discoveredSecrets: string[];
   flashlightBattery: number;
   batteries: number;
+  reloadKeyLabel?: string;
+  journalKeyLabel?: string;
   onReloadBattery: () => void;
   onClose: () => void;
 }
@@ -34,6 +36,8 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
   discoveredSecrets,
   flashlightBattery,
   batteries,
+  reloadKeyLabel = 'R',
+  journalKeyLabel = 'J',
   onReloadBattery,
   onClose,
 }) => {
@@ -164,7 +168,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
                   }`}
                 >
                   <BatteryCharging className="w-3.5 h-3.5" />
-                  Заменить батарейку [R]
+                  Заменить батарейку [{reloadKeyLabel}]
                 </button>
               </div>
 
@@ -315,7 +319,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
                       </div>
                       {owned && (
                         <div className="text-[10px] text-[#bfa77e] mt-1">
-                          {tape.clueLink} · Прослушивание в журнале [J]
+                          {tape.clueLink} · Прослушивание в журнале [{journalKeyLabel}]
                         </div>
                       )}
                     </div>

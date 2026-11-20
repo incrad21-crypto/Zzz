@@ -131,17 +131,31 @@ export function createInitialGameState(skipPrologue = false): GameState {
   };
 }
 
+function fnv1aHash(str: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 export function serializeGameState(state: GameState): string {
-  const snapshot = {
+  const snapshot: Record<string, unknown> = {
     ...state,
     saveVersion: CURRENT_SAVE_VERSION,
     screen: 'playing',
     activeOverlay: 'none',
+    activeContainerId: null,
     activeInspectId: null,
+    selectedNoteId: null,
     activeDialogue: null,
     dialogueQueue: [],
     lastSaveTimestamp: Date.now(),
   };
+  delete snapshot._checksum;
+  const body = JSON.stringify(snapshot);
+  snapshot._checksum = fnv1aHash(body);
   return JSON.stringify(snapshot);
 }
 
@@ -170,11 +184,22 @@ function uniqueValidStrings<T extends string>(val: unknown, allowlist?: Readonly
 export function deserializeGameState(raw: string): GameState | null {
   try {
     const rawParsed = JSON.parse(raw) as unknown;
+    if (
+      rawParsed &&
+      typeof rawParsed === 'object' &&
+      !Array.isArray(rawParsed) &&
+      typeof (rawParsed as { _checksum?: unknown })._checksum === 'string'
+    ) {
+      const { _checksum, ...withoutChecksum } = rawParsed as Record<string, unknown>;
+      if (fnv1aHash(JSON.stringify(withoutChecksum)) !== _checksum) {
+        return null;
+      }
+    }
     const migrated = migrateSavePayload(rawParsed);
     if (!migrated) {
       return null;
     }
-    const parsed = migrated.payload as Partial<GameState>;
+    const parsed = migrated.payload as Partial<GameState> & { _checksum?: unknown };
     if (!parsed || !parsed.player || !Array.isArray(parsed.installedParts)) {
       return null;
     }
@@ -243,11 +268,17 @@ export function deserializeGameState(raw: string): GameState | null {
     const breakerFixed =
       Boolean(parsed.breakerFixed) || discoveredSecrets.includes('secret_basement_vent');
 
-    return {
+    const sanitized: GameState = {
       ...base,
       ...parsed,
       saveVersion: CURRENT_SAVE_VERSION,
+      safeUnlocked: Boolean(parsed.safeUnlocked),
+      clockSolved: Boolean(parsed.clockSolved),
+      terminalSolved: Boolean(parsed.terminalSolved),
+      phoneListened: Boolean(parsed.phoneListened),
       breakerFixed,
+      radioTunedSecret: Boolean(parsed.radioTunedSecret),
+      robotFirstMet: Boolean(parsed.robotFirstMet),
       playTimeSeconds: finiteOr(parsed.playTimeSeconds, 0, 0),
       player: {
         ...base.player,
@@ -267,6 +298,8 @@ export function deserializeGameState(raw: string): GameState | null {
         isRunning: false,
         isHiding: false,
         hidingSpotId: null,
+        interactAnimTimer: finiteOr(parsed.player.interactAnimTimer, 0, 0, 5),
+        startledTimer: finiteOr(parsed.player.startledTimer, 0, 0, 5),
         exhausted: Boolean(parsed.player.exhausted),
         walkCycle: 0,
       },
@@ -280,7 +313,15 @@ export function deserializeGameState(raw: string): GameState | null {
         radioBroken: Boolean(parsed.prologue?.radioBroken),
         headlightFlicker: finiteOr(parsed.prologue?.headlightFlicker, 1, 0, 1),
       },
-      atmospheric: { ...base.atmospheric, ...(parsed.atmospheric ?? {}) },
+      atmospheric: {
+        forestSilhouetteSeen: Boolean(parsed.atmospheric?.forestSilhouetteSeen),
+        rainPausedTriggered: Boolean(parsed.atmospheric?.rainPausedTriggered),
+        tvStaticTriggered: Boolean(parsed.atmospheric?.tvStaticTriggered),
+        portraitChanged: Boolean(parsed.atmospheric?.portraitChanged),
+        mannequinMoved: Boolean(parsed.atmospheric?.mannequinMoved),
+        hallwaySilhouetteSeen: Boolean(parsed.atmospheric?.hallwaySilhouetteSeen),
+        doorRelockedOnce: Boolean(parsed.atmospheric?.doorRelockedOnce),
+      },
       shadowEncounter: {
         ...base.shadowEncounter,
         ...(parsed.shadowEncounter ?? {}),
@@ -289,6 +330,7 @@ export function deserializeGameState(raw: string): GameState | null {
         floor: Math.round(finiteOr(parsed.shadowEncounter?.floor, 1, 0, 4)),
         exposure: finiteOr(parsed.shadowEncounter?.exposure, 0, 0, 1),
         cooldown: finiteOr(parsed.shadowEncounter?.cooldown, 18, 0),
+        hideTimer: finiteOr(parsed.shadowEncounter?.hideTimer, 0, 0),
         behavior: shadowBehavior,
       },
       horror: {
@@ -301,6 +343,7 @@ export function deserializeGameState(raw: string): GameState | null {
         roomDwellTime: finiteOr(parsed.horror?.roomDwellTime, 0, 0),
         flickerTimer: finiteOr(parsed.horror?.flickerTimer, 0, 0),
         triggeredAnomalies: uniqueValidStrings<string>(parsed.horror?.triggeredAnomalies),
+        recentAnomalies: uniqueValidStrings<string>(parsed.horror?.recentAnomalies),
       },
       finale: {
         ...base.finale,
@@ -335,9 +378,12 @@ export function deserializeGameState(raw: string): GameState | null {
       activeOverlay: 'none',
       activeContainerId: null,
       activeInspectId: null,
+      selectedNoteId: null,
       activeDialogue: null,
       dialogueQueue: [],
     };
+    delete (sanitized as GameState & { _checksum?: unknown })._checksum;
+    return sanitized;
   } catch {
     return null;
   }

@@ -166,16 +166,13 @@ export function recordInspectHotspotDiscovery(
     return { observation: obs };
   }
 
-  if (
-    firstTime &&
-    targetId === 'forest_car' &&
-    hotspotId === 'windshield_note' &&
-    state.installedParts.length >= 4
-  ) {
+  if (targetId === 'forest_car' && hotspotId === 'windshield_note' && state.installedParts.length >= 4) {
     const obs =
       'На запотевшем стекле машины изнутри появилась надпись: «ВОЗВРАЩАЙСЯ В КЛАДОВУЮ».';
-    state.journalObservations.push(obs);
-    return { observation: obs };
+    if (!state.journalObservations.includes(obs)) {
+      state.journalObservations.push(obs);
+      return { observation: obs };
+    }
   }
 
   return {};

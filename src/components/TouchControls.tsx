@@ -57,6 +57,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 }) => {
   const padRef = useRef<HTMLDivElement | null>(null);
   const [knobOffset, setKnobOffset] = useState(0); // -1..1 normalized horizontal drag
+  const [heldButtons, setHeldButtons] = useState<Record<string, boolean>>({});
   const activePointerRef = useRef<number | null>(null);
 
   const leftCode = keyBindings.left;
@@ -68,6 +69,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     const releaseAll = () => {
       activePointerRef.current = null;
       setKnobOffset(0);
+      setHeldButtons({});
       onHoldKey(leftCode, false);
       onHoldKey(rightCode, false);
       onHoldKey(runCode, false);
@@ -133,22 +135,29 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     onHoldKey(rightCode, false);
   };
 
+  const setHoldState = (code: string, pressed: boolean) => {
+    setHeldButtons((prev) => (prev[code] === pressed ? prev : { ...prev, [code]: pressed }));
+    onHoldKey(code, pressed);
+  };
+
   const bindHold = (code: string) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
+      e.stopPropagation();
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
         // Ignore if pointer capture is unavailable in synthetic test events
       }
-      onHoldKey(code, true);
+      setHoldState(code, true);
     },
     onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
-      onHoldKey(code, false);
+      e.stopPropagation();
+      setHoldState(code, false);
     },
-    onLostPointerCapture: () => onHoldKey(code, false),
-    onPointerCancel: () => onHoldKey(code, false),
+    onLostPointerCapture: () => setHoldState(code, false),
+    onPointerCancel: () => setHoldState(code, false),
   });
 
   const movementCluster = (
@@ -157,16 +166,26 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <button
           type="button"
           aria-label="Бег"
+          aria-pressed={Boolean(heldButtons[runCode])}
           {...bindHold(runCode)}
-          className={`${sizeConfig.smallBtn} bg-[#0b111a]/88 active:bg-[#1e3147] border border-[#324357] text-[#c7d6e6]`}
+          className={`${sizeConfig.smallBtn} border transition-colors ${
+            heldButtons[runCode]
+              ? 'bg-[#1e3147] border-[#7cd4ff] text-white'
+              : 'bg-[#0b111a]/88 active:bg-[#1e3147] border-[#324357] text-[#c7d6e6]'
+          }`}
         >
           Бег
         </button>
         <button
           type="button"
           aria-label="Присесть"
+          aria-pressed={Boolean(heldButtons[crouchCode])}
           {...bindHold(crouchCode)}
-          className={`${sizeConfig.smallBtn} bg-[#0b111a]/88 active:bg-[#1e3147] border border-[#324357] text-[#c7d6e6]`}
+          className={`${sizeConfig.smallBtn} border transition-colors ${
+            heldButtons[crouchCode]
+              ? 'bg-[#1e3147] border-[#7cd4ff] text-white'
+              : 'bg-[#0b111a]/88 active:bg-[#1e3147] border-[#324357] text-[#c7d6e6]'
+          }`}
         >
           Присед
         </button>
@@ -182,18 +201,25 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         aria-valuenow={Math.round(knobOffset * 100)}
         onPointerDown={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           activePointerRef.current = e.pointerId;
-          e.currentTarget.setPointerCapture(e.pointerId);
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // Ignore synthetic environments without pointer capture
+          }
           applyStick(e.clientX);
         }}
         onPointerMove={(e) => {
           if (activePointerRef.current !== e.pointerId) return;
           e.preventDefault();
+          e.stopPropagation();
           applyStick(e.clientX);
         }}
         onPointerUp={(e) => {
           if (activePointerRef.current !== e.pointerId) return;
           e.preventDefault();
+          e.stopPropagation();
           releaseStick();
         }}
         onPointerCancel={releaseStick}
@@ -233,6 +259,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           <button
             type="button"
             aria-label="Карта дома"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={onToggleMap}
             className="px-2 sm:px-2.5 py-1.5 bg-[#0b111a]/88 active:bg-[#19283a] border border-[#2f4054] text-[10px] text-[#bfd0e0] flex items-center gap-1"
           >
@@ -243,6 +270,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <button
           type="button"
           aria-label="Инвентарь"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={onToggleInventory}
           className="px-2 sm:px-2.5 py-1.5 bg-[#0b111a]/88 active:bg-[#19283a] border border-[#2f4054] text-[10px] text-[#bfd0e0] flex items-center gap-1"
         >
@@ -252,6 +280,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <button
           type="button"
           aria-label="Журнал"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={onToggleJournal}
           className="relative px-2 sm:px-2.5 py-1.5 bg-[#0b111a]/88 active:bg-[#19283a] border border-[#2f4054] text-[10px] text-[#bfd0e0] flex items-center gap-1"
         >
@@ -264,6 +293,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <button
           type="button"
           aria-label="Пауза"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={onOpenPause}
           className="px-2 py-1.5 bg-[#0b111a]/88 active:bg-[#19283a] border border-[#2f4054] text-[10px] text-[#bfd0e0]"
         >
@@ -276,6 +306,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           <button
             type="button"
             aria-label="Заменить батарейку"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={onReloadBattery}
             className={`${sizeConfig.smallBtn} bg-[#0b111a]/88 active:bg-[#173024] border border-[#324357] text-[#a9e8c3] flex items-center gap-1`}
           >
@@ -285,6 +316,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           <button
             type="button"
             aria-label="Фонарик"
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={onToggleFlashlight}
             className={`${sizeConfig.smallBtn} border flex items-center gap-1 ${
               flashlightOn
@@ -301,6 +333,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       <button
         type="button"
         aria-label="Действие"
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={onInteract}
         className={`${sizeConfig.actionBtn} border font-semibold flex items-center gap-2 ${
           promptLabel || isHiding
@@ -316,7 +349,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
   return (
     <div
-      className="fixed inset-x-0 bottom-1.5 sm:bottom-2 z-20 px-2.5 sm:px-4 pb-1.5 sm:pb-2 flex items-end justify-between gap-2 pointer-events-none select-none touch-none font-ui"
+      className="fixed inset-x-0 bottom-0 z-20 px-[max(0.625rem,env(safe-area-inset-left))] pr-[max(0.625rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-[max(1rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] flex items-end justify-between gap-2 pointer-events-none select-none touch-none font-ui"
       aria-label="Сенсорное управление"
     >
       {touchLayout === 'swapped' ? (

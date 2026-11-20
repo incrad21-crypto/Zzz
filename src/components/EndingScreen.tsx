@@ -25,7 +25,10 @@ export const EndingScreen: React.FC<EndingScreenProps> = ({
   const ending = ENDINGS[summary.endingId] ?? ENDINGS.awakening;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black p-6 text-[#dce4ec] font-ui">
+    <div
+      data-ending-screen="true"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black p-6 text-[#dce4ec] font-ui"
+    >
       <div className="my-auto w-full max-w-xl max-h-[92vh] overflow-y-auto pr-1 text-center space-y-6">
         <div>
           <p
@@ -77,12 +80,43 @@ export const EndingScreen: React.FC<EndingScreenProps> = ({
           </div>
         </div>
 
-        <div className="text-xs font-mono-ui text-[#7c8ea2]">
-          Открыто концовок: {unlockedEndings.length} / 3
+        <div className="space-y-3">
+          <div className="text-xs font-mono-ui text-[#7c8ea2]">
+            Открыто концовок: {unlockedEndings.length} / 3
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-left text-xs">
+            {(['awakening', 'liberation', 'last_record'] as EndingId[]).map((eid) => {
+              const def = ENDINGS[eid];
+              const unlocked = unlockedEndings.includes(eid) || eid === summary.endingId;
+              const isCurrent = eid === summary.endingId;
+              return (
+                <div
+                  key={eid}
+                  className={`border px-3 py-2 ${
+                    isCurrent
+                      ? 'bg-[#0e141d] border-[#618cb5] text-[#eef3f8]'
+                      : unlocked
+                      ? 'bg-[#080d14] border-[#29384a] text-[#bfd0e0]'
+                      : 'bg-[#06090e] border-[#19202b] text-[#556373]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 text-[10px] font-mono-ui mb-0.5">
+                    <span style={{ color: unlocked ? def.accentColor : '#556373' }}>
+                      {isCurrent ? 'ТЕКУЩАЯ' : unlocked ? 'ОТКРЫТА' : 'ЗАКРЫТА'}
+                    </span>
+                  </div>
+                  <div className="font-semibold tracking-wide truncate">
+                    {unlocked ? def.title : '???'}
+                  </div>
+                  <div className="text-[11px] opacity-75 truncate">{def.tag}</div>
+                </div>
+              );
+            })}
+          </div>
           {unlockedEndings.length < 3 && (
-            <span className="block text-[11px] text-[#5e7185] mt-1">
+            <p className="text-[11px] text-[#5e7185] font-mono-ui">
               Исследуйте записки, терминал 3-го этажа и частоту 104.8 МГц, чтобы открыть все развязки.
-            </span>
+            </p>
           )}
         </div>
 

@@ -13,6 +13,9 @@ interface ContainerModalProps {
   installedParts: PartId[];
   collectedKeys: KeyItemId[];
   collectedNotes: string[];
+  interactKeyCode?: string;
+  interactKeyLabel?: string;
+  reloadKeyLabel?: string;
   onCollectAll: (openNoteAfter?: boolean) => void;
   onClose: () => void;
 }
@@ -24,6 +27,9 @@ export const ContainerModal: React.FC<ContainerModalProps> = ({
   installedParts,
   collectedKeys,
   collectedNotes,
+  interactKeyCode = 'KeyE',
+  interactKeyLabel = 'E',
+  reloadKeyLabel = 'R',
   onCollectAll,
   onClose,
 }) => {
@@ -48,7 +54,7 @@ export const ContainerModal: React.FC<ContainerModalProps> = ({
   useEffect(() => {
     if (!item) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'KeyE' || e.code === 'Enter') {
+      if (e.code === interactKeyCode || e.code === 'KeyE' || e.code === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
         onCollectAll(false);
@@ -56,7 +62,7 @@ export const ContainerModal: React.FC<ContainerModalProps> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [item, onCollectAll]);
+  }, [interactKeyCode, item, onCollectAll]);
 
   if (!item) return null;
 
@@ -122,7 +128,7 @@ export const ContainerModal: React.FC<ContainerModalProps> = ({
                   Батарейка для фонарика (<span className="font-mono-ui">{batteryCount} шт.</span>)
                 </div>
                 <div className="text-xs text-[#7ea88e] mt-0.5">
-                  Пополняет заряд кнопкой <span className="font-mono-ui">[R]</span>
+                  Пополняет заряд кнопкой <span className="font-mono-ui">[{reloadKeyLabel}]</span>
                 </div>
               </div>
             </div>
@@ -157,7 +163,7 @@ export const ContainerModal: React.FC<ContainerModalProps> = ({
             onClick={() => onCollectAll(false)}
             className="px-4 py-1.5 bg-[#7cd4ff] hover:bg-[#a6e3ff] text-[#070a0f] text-xs font-semibold cursor-pointer"
           >
-            {hasAnyLoot ? 'Забрать всё' : 'Проверено'} <span className="font-mono-ui">[E]</span>
+            {hasAnyLoot ? 'Забрать всё' : 'Проверено'} <span className="font-mono-ui">[{interactKeyLabel}]</span>
           </button>
         </div>
     </GameModal>

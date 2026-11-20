@@ -141,7 +141,14 @@ export class GameRuntime {
     }
   }
 
-  public pollGamepad(): GamepadSnapshot {
-    return pollBrowserGamepad(this.gamepadPrev);
+  public pollGamepad(deadzone?: number): GamepadSnapshot {
+    return pollBrowserGamepad(this.gamepadPrev, deadzone);
+  }
+
+  public dispose(): void {
+    this.clearInput();
+    clearDialogueRuntime(this.dialogue);
+    this._renderer = null;
+    this.lastDucking = false;
   }
 }

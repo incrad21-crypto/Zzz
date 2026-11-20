@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Cpu, ShieldAlert, Terminal } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Cpu, RotateCcw, ShieldAlert, Terminal } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { GameModal } from './GameModal';
 
@@ -22,26 +22,54 @@ export const TerminalModal: React.FC<TerminalModalProps> = ({
 
   const decrypted = alreadySolved || (!audioOn && !driveOn && memoryPowerOn);
 
-  const handleToggle = (channel: 'audio' | 'drive' | 'power') => {
+  const handleToggle = useCallback(
+    (channel: 'audio' | 'drive' | 'power') => {
+      if (alreadySolved) return;
+      const nextAudio = channel === 'audio' ? !audioOn : audioOn;
+      const nextDrive = channel === 'drive' ? !driveOn : driveOn;
+      const nextPower = channel === 'power' ? !memoryPowerOn : memoryPowerOn;
+
+      setAudioOn(nextAudio);
+      setDriveOn(nextDrive);
+      setMemoryPowerOn(nextPower);
+
+      if (!nextAudio && !nextDrive && nextPower) {
+        soundEngine.playSfx('unlock');
+        onSolved();
+      } else {
+        soundEngine.playSfx('switch');
+      }
+    },
+    [alreadySolved, audioOn, driveOn, memoryPowerOn, onSolved]
+  );
+
+  const handleReset = useCallback(() => {
     if (alreadySolved) return;
-    let nextAudio = audioOn;
-    let nextDrive = driveOn;
-    let nextPower = memoryPowerOn;
-    if (channel === 'audio') nextAudio = !audioOn;
-    if (channel === 'drive') nextDrive = !driveOn;
-    if (channel === 'power') nextPower = !memoryPowerOn;
+    soundEngine.playUiSfx('cancel');
+    setAudioOn(true);
+    setDriveOn(true);
+    setMemoryPowerOn(true);
+  }, [alreadySolved]);
 
-    setAudioOn(nextAudio);
-    setDriveOn(nextDrive);
-    setMemoryPowerOn(nextPower);
-
-    if (!nextAudio && !nextDrive && nextPower) {
-      soundEngine.playSfx('unlock');
-      onSolved();
-    } else {
-      soundEngine.playSfx('switch');
-    }
-  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '1') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleToggle('audio');
+      } else if (e.key === '2') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleToggle('drive');
+      } else if (e.key === '3') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleToggle('power');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleToggle]);
 
   return (
     <GameModal
@@ -161,7 +189,10 @@ export const TerminalModal: React.FC<TerminalModalProps> = ({
           </svg>
         </div>
 
-        <div className="border border-[#1c332d] bg-[#030605] p-3.5 min-h-[155px] text-xs leading-relaxed mb-4">
+        <div
+          aria-live="polite"
+          className="border border-[#1c332d] bg-[#030605] p-3.5 min-h-[155px] text-xs leading-relaxed mb-4"
+        >
           {decrypted ? (
             <div className="space-y-2.5 text-[#9ee8c7]">
               <div className="flex items-center gap-2 text-[#6edba9] uppercase tracking-wider text-[11px]">
@@ -190,13 +221,25 @@ export const TerminalModal: React.FC<TerminalModalProps> = ({
                   : 'ДОСТУП ЗАБЛОКИРОВАН ПРОТОКОЛОМ ЭХО-4.'}
               </div>
               <div className="text-[11px] max-w-sm opacity-85">
-                Для чтения скрытых логов изолируйте обе активные подсистемы (ГОЛОС и ПРИВОД), оставив питание ПАМЯТИ включённым.
+                Для чтения скрытых логов изолируйте обе активные подсистемы (ГОЛОС и ПРИВОД), оставив питание ПАМЯТИ включённым. Клавиши [1–3].
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          {!decrypted ? (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#091210] hover:bg-[#11221d] border border-[#244239] text-xs text-[#89b5a6] cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Сброс шин
+            </button>
+          ) : (
+            <span />
+          )}
           <button
             type="button"
             onClick={onClose}

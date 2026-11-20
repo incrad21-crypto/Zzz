@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Eye, Play, Sparkles, Volume2 } from 'lucide-react';
 import { soundEngine } from '../game/audio';
 import { InspectTargetId } from '../game/types';
@@ -209,56 +209,42 @@ export const InspectModal: React.FC<InspectModalProps> = ({
   const selectedHotspot =
     current.hotspots.find((h) => h.id === activeHotspotId) ?? current.hotspots[0];
 
-  const handleSelectHotspot = (hotspot: InspectHotspot) => {
-    setActiveHotspotId(hotspot.id);
-    if (tapeTimerRef.current !== null) {
-      window.clearTimeout(tapeTimerRef.current);
-      tapeTimerRef.current = null;
-    }
-    if (hotspot.isPlayTape) {
-      setPlayingTape(true);
-      soundEngine.playTapePlayback(1);
-      tapeTimerRef.current = window.setTimeout(() => {
+  const handleSelectHotspot = useCallback(
+    (hotspot: InspectHotspot) => {
+      setActiveHotspotId(hotspot.id);
+      if (tapeTimerRef.current !== null) {
+        window.clearTimeout(tapeTimerRef.current);
         tapeTimerRef.current = null;
+      }
+      if (hotspot.isPlayTape) {
+        setPlayingTape(true);
+        soundEngine.playTapePlayback(1);
+        tapeTimerRef.current = window.setTimeout(() => {
+          tapeTimerRef.current = null;
+          setPlayingTape(false);
+        }, 1800);
+      } else {
         setPlayingTape(false);
-      }, 1800);
-    } else {
-      setPlayingTape(false);
-      soundEngine.playSfx('paper');
-    }
-    onInspectHotspot(targetId, hotspot.id);
-  };
+        soundEngine.playSfx('paper');
+      }
+      onInspectHotspot(targetId, hotspot.id);
+    },
+    [onInspectHotspot, targetId]
+  );
 
   useEffect(() => {
-    const spots = meta[targetId].hotspots;
+    const spots = current.hotspots;
     const onKey = (e: KeyboardEvent) => {
       const idx = e.key === '1' ? 0 : e.key === '2' ? 1 : e.key === '3' ? 2 : -1;
       if (idx >= 0 && spots[idx]) {
         e.preventDefault();
         e.stopPropagation();
-        const spot = spots[idx];
-        setActiveHotspotId(spot.id);
-        if (tapeTimerRef.current !== null) {
-          window.clearTimeout(tapeTimerRef.current);
-          tapeTimerRef.current = null;
-        }
-        if (spot.isPlayTape) {
-          setPlayingTape(true);
-          soundEngine.playTapePlayback(1);
-          tapeTimerRef.current = window.setTimeout(() => {
-            tapeTimerRef.current = null;
-            setPlayingTape(false);
-          }, 1800);
-        } else {
-          setPlayingTape(false);
-          soundEngine.playSfx('paper');
-        }
-        onInspectHotspot(targetId, spot.id);
+        handleSelectHotspot(spots[idx]);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [targetId, onInspectHotspot]);
+  }, [current.hotspots, handleSelectHotspot]);
 
   return (
     <GameModal
@@ -517,7 +503,10 @@ export const InspectModal: React.FC<InspectModalProps> = ({
             </div>
 
             {selectedHotspot && (
-              <div className="border border-[#243242] bg-[#0b1017] p-3.5 min-h-[115px]">
+              <div
+                aria-live="polite"
+                className="border border-[#243242] bg-[#0b1017] p-3.5 min-h-[115px]"
+              >
                 <div className="text-[11px] font-medium text-[#7cd4ff] mb-1.5">
                   {selectedHotspot.label}
                 </div>

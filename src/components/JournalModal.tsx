@@ -50,6 +50,7 @@ interface JournalModalProps {
   observations: string[];
   mysteries: MysteryProgress;
   initialNoteId: string | null;
+  journalKeyLabel?: string;
   onMarkNoteRead: (noteId: string) => void;
   onMarkTapeRead: (tapeId: AudioTapeId) => void;
   onClose: () => void;
@@ -77,6 +78,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
   observations,
   mysteries,
   initialNoteId,
+  journalKeyLabel = 'J',
   onMarkNoteRead,
   onMarkTapeRead,
   onClose,
@@ -857,7 +859,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
             onClick={onClose}
             className="px-3.5 py-1.5 border border-[#2c3645] hover:bg-[#171e29] text-xs text-[#d5dee8] cursor-pointer"
           >
-            Esc / J — закрыть
+            Esc / {journalKeyLabel} — закрыть
           </button>
         </div>
     </GameModal>

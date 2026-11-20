@@ -37,7 +37,7 @@ export const KeyBindingsEditor: React.FC<KeyBindingsEditorProps> = ({ bindings, 
   return (
     <div className="border border-[#233042] bg-[#0a0f17] p-2.5 space-y-2 text-[11px] font-mono-ui">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#7a92ab]">
+        <span aria-live="polite" className="text-[10px] uppercase tracking-wider text-[#7a92ab]">
           {listeningAction
             ? `Нажмите новую клавишу для «${KEY_ACTION_LABELS[listeningAction]}» (Esc — отмена)`
             : 'Нажмите на действие, чтобы переназначить клавишу'}
@@ -62,6 +62,7 @@ export const KeyBindingsEditor: React.FC<KeyBindingsEditorProps> = ({ bindings, 
             <button
               key={action}
               type="button"
+              aria-pressed={isListening}
               onClick={() => setListeningAction((cur) => (cur === action ? null : action))}
               className={`flex items-center justify-between px-2.5 py-1.5 border text-left transition-colors cursor-pointer ${
                 isListening

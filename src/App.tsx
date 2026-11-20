@@ -1,30 +1,58 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AssemblyModal } from './components/AssemblyModal';
-import { BreakerModal } from './components/BreakerModal';
-import { ClockModal } from './components/ClockModal';
-import { ContainerModal } from './components/ContainerModal';
-import { EndingScreen } from './components/EndingScreen';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { GameHUD, HudSnapshot } from './components/GameHUD';
-import { InspectModal } from './components/InspectModal';
-import { InventoryModal } from './components/InventoryModal';
-import { JournalModal } from './components/JournalModal';
-import { MapModal } from './components/MapModal';
-import { PauseModal } from './components/PauseModal';
-import { RadioModal } from './components/RadioModal';
-import { SafeModal } from './components/SafeModal';
-import { TerminalModal } from './components/TerminalModal';
 import { SaveSummaryInfo, TitleScreen } from './components/TitleScreen';
 import { TouchControls } from './components/TouchControls';
+
+const AssemblyModal = lazy(() =>
+  import('./components/AssemblyModal').then((m) => ({ default: m.AssemblyModal }))
+);
+const BreakerModal = lazy(() =>
+  import('./components/BreakerModal').then((m) => ({ default: m.BreakerModal }))
+);
+const ClockModal = lazy(() =>
+  import('./components/ClockModal').then((m) => ({ default: m.ClockModal }))
+);
+const ContainerModal = lazy(() =>
+  import('./components/ContainerModal').then((m) => ({ default: m.ContainerModal }))
+);
+const EndingScreen = lazy(() =>
+  import('./components/EndingScreen').then((m) => ({ default: m.EndingScreen }))
+);
+const InspectModal = lazy(() =>
+  import('./components/InspectModal').then((m) => ({ default: m.InspectModal }))
+);
+const InventoryModal = lazy(() =>
+  import('./components/InventoryModal').then((m) => ({ default: m.InventoryModal }))
+);
+const JournalModal = lazy(() =>
+  import('./components/JournalModal').then((m) => ({ default: m.JournalModal }))
+);
+const MapModal = lazy(() =>
+  import('./components/MapModal').then((m) => ({ default: m.MapModal }))
+);
+const PauseModal = lazy(() =>
+  import('./components/PauseModal').then((m) => ({ default: m.PauseModal }))
+);
+const RadioModal = lazy(() =>
+  import('./components/RadioModal').then((m) => ({ default: m.RadioModal }))
+);
+const SafeModal = lazy(() =>
+  import('./components/SafeModal').then((m) => ({ default: m.SafeModal }))
+);
+const TerminalModal = lazy(() =>
+  import('./components/TerminalModal').then((m) => ({ default: m.TerminalModal }))
+);
 import { soundEngine } from './game/audio';
 import { ALL_NOTES, AUDIO_TAPES, PART_BY_ID, SECRETS } from './game/content';
-import { matchesKeyAction } from './game/controllers/inputController';
+import { vibrateGamepad } from './game/controllers/gamepadController';
+import { isKeyBoundToAction, matchesKeyAction } from './game/controllers/inputController';
 import { runSimulationStep } from './game/controllers/simulationStep';
 import { canUnlockLastRecordEnding } from './game/dialogueDirector';
 import { gameDiagnostics, installGlobalDiagnosticsHandle } from './game/diagnostics';
 import { GameLoop } from './game/engine/GameLoop';
 import { GameRuntime } from './game/engine/GameRuntime';
 import { gameEventBus } from './game/eventBus';
-import { trackVisitedRoom } from './game/horrorDirector';
+import { getCurrentRoomId, trackVisitedRoom } from './game/horrorDirector';
 import { VIRTUAL_H, VIRTUAL_W } from './game/renderer';
 import {
   chooseFinaleEnding,
@@ -52,6 +80,7 @@ import {
 import {
   deleteSaveSlot,
   exportSavePayload,
+  formatKeyCode,
   importSavePayload,
   listSaveSlots,
   loadFromSlot,
@@ -95,8 +124,10 @@ export default function App() {
     soundEngine.setMixerVolumes({
       master: s.masterVolume,
       ambience: s.ambienceVolume,
+      music: s.musicVolume,
       sfx: s.sfxVolume,
       voice: s.voiceVolume,
+      ui: s.uiVolume,
     });
     return s;
   });
@@ -206,6 +237,18 @@ export default function App() {
   useEffect(() => {
     installGlobalDiagnosticsHandle();
     const unregister = registerGameEventListeners();
+    const unsubShadow = gameEventBus.on('shadow:event', ({ kind }) => {
+      if (kind === 'startled') {
+        vibrateGamepad(260, 0.5, 0.8, settingsRef.current.gamepadVibration ?? true);
+      }
+    });
+    const unsubPart = gameEventBus.on('part:installed', ({ installedCount }) => {
+      if (installedCount >= 8) {
+        vibrateGamepad(360, 0.45, 0.75, settingsRef.current.gamepadVibration ?? true);
+      } else {
+        vibrateGamepad(90, 0.25, 0.4, settingsRef.current.gamepadVibration ?? true);
+      }
+    });
     if (bindingsRepairedRef.current) {
       bindingsRepairedRef.current = false;
       pushToast(
@@ -215,9 +258,18 @@ export default function App() {
       );
     }
     return () => {
+      unsubShadow();
+      unsubPart();
       unregister();
     };
   }, [pushToast]);
+
+  useEffect(() => {
+    return () => {
+      runtime.dispose();
+      soundEngine.dispose();
+    };
+  }, [runtime]);
 
   const recordUnlockedEnding = useCallback((endingId: EndingId) => {
     gameEventBus.emit('ending:reached', { endingId });
@@ -585,8 +637,10 @@ export default function App() {
     soundEngine.setMixerVolumes({
       master: next.masterVolume,
       ambience: next.ambienceVolume,
+      music: next.musicVolume,
       sfx: next.sfxVolume,
       voice: next.voiceVolume,
+      ui: next.uiVolume,
     });
     saveSettings(next);
     loopRef.current?.setRenderFpsCap(next.renderFpsCap ?? 0);
@@ -1095,7 +1149,7 @@ export default function App() {
         return;
       }
 
-      if (code === 'Escape' || code === 'KeyP') {
+      if (code === 'Escape' || (code === 'KeyP' && !isKeyBoundToAction(code, bindings))) {
         e.preventDefault();
         if (st.activeOverlay !== 'none') {
           closeActiveOverlay();
@@ -1146,7 +1200,7 @@ export default function App() {
         toggleOverlay('map');
         return;
       }
-      if (code === 'KeyM') {
+      if (code === 'KeyM' && !isKeyBoundToAction(code, bindings)) {
         handleToggleMute();
         return;
       }
@@ -1333,15 +1387,70 @@ export default function App() {
       onFrameSync: (dt) => {
         const st = runtime.state;
         const timers = runtime.timers;
-        const gp = runtime.pollGamepad();
+        const gp = runtime.pollGamepad(settingsRef.current.gamepadDeadzone ?? 0.28);
         currentGamepadHeld = gp.connected
           ? { left: gp.left, right: gp.right, run: gp.run, crouch: gp.down }
           : undefined;
 
         if (gp.connected) {
           const actions = gamepadActionsRef.current;
+          const stepGamepadFocus = (container: HTMLElement | null): boolean => {
+            if (!container) return false;
+            const focusables = Array.from(
+              container.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+              )
+            ).filter((el) => el.getClientRects().length > 0);
+            if (focusables.length === 0) return false;
+            const activeEl = document.activeElement as HTMLElement | null;
+            const activeIdx = activeEl ? focusables.indexOf(activeEl) : -1;
+            const isRange =
+              activeEl instanceof HTMLInputElement && activeEl.type === 'range';
+            if (isRange && (gp.justLeft || gp.justRight)) {
+              const step = Number(activeEl.step) || 1;
+              const min = Number(activeEl.min) || 0;
+              const max = Number(activeEl.max) || 100;
+              const cur = Number(activeEl.value) || 0;
+              const next = Math.max(
+                min,
+                Math.min(max, cur + (gp.justRight ? step : -step))
+              );
+              const descriptor = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                'value'
+              );
+              descriptor?.set?.call(activeEl, String(next));
+              activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+              activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+            if (gp.justUp || gp.justLeft) {
+              const prevIdx = activeIdx <= 0 ? focusables.length - 1 : activeIdx - 1;
+              const el = focusables[prevIdx];
+              el?.focus();
+              el?.scrollIntoView({ block: 'nearest' });
+              return true;
+            }
+            if (gp.justDown || gp.justRight) {
+              const nextIdx =
+                activeIdx < 0 || activeIdx >= focusables.length - 1 ? 0 : activeIdx + 1;
+              const el = focusables[nextIdx];
+              el?.focus();
+              el?.scrollIntoView({ block: 'nearest' });
+              return true;
+            }
+            if (gp.justInteract && activeIdx >= 0) {
+              focusables[activeIdx]?.click();
+              return true;
+            }
+            return false;
+          };
+
           if (st.screen === 'title') {
-            if (gp.justInteract && !titlePanelOpenRef.current) {
+            const titleRoot = document.querySelector<HTMLElement>('[data-title-screen="true"]');
+            if (gp.justCancel && titlePanelOpenRef.current) {
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
+            } else if (!stepGamepadFocus(titleRoot) && gp.justInteract && !titlePanelOpenRef.current) {
               soundEngine.markUserGesture();
               if (readSaveSummary()) {
                 actions.continueSavedGame();
@@ -1350,11 +1459,14 @@ export default function App() {
               }
             }
           } else if (st.screen === 'gameover') {
-            if (gp.justInteract) {
-              soundEngine.markUserGesture();
-              actions.startNewGame(false);
-            } else if (gp.justCancel) {
-              actions.returnToTitleScreen();
+            const endingRoot = document.querySelector<HTMLElement>('[data-ending-screen="true"]');
+            if (!stepGamepadFocus(endingRoot)) {
+              if (gp.justInteract) {
+                soundEngine.markUserGesture();
+                actions.startNewGame(false);
+              } else if (gp.justCancel) {
+                actions.returnToTitleScreen();
+              }
             }
           } else if (gp.justPause) {
             if (st.screen === 'playing') {
@@ -1373,6 +1485,31 @@ export default function App() {
             } else if (st.screen === 'paused') {
               st.screen = 'playing';
               setScreen('playing');
+            }
+          } else if (
+            st.screen === 'paused' ||
+            (st.screen === 'playing' && st.activeOverlay !== 'none')
+          ) {
+            const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+            if (!stepGamepadFocus(dialog) && gp.justInteract && dialog) {
+              dialog.querySelector<HTMLElement>('button:not([disabled])')?.click();
+            }
+          } else if (st.screen === 'playing' && st.finale.active && st.finale.phase === 'choice') {
+            const buttons = Array.from(
+              document.querySelectorAll<HTMLButtonElement>('[data-finale-choice]:not([disabled])')
+            );
+            if (buttons.length > 0) {
+              const activeIdx = buttons.findIndex((b) => b === document.activeElement);
+              if (gp.justUp || gp.justLeft) {
+                const prevIdx = activeIdx <= 0 ? buttons.length - 1 : activeIdx - 1;
+                buttons[prevIdx]?.focus();
+              } else if (gp.justDown || gp.justRight) {
+                const nextIdx = activeIdx < 0 || activeIdx >= buttons.length - 1 ? 0 : activeIdx + 1;
+                buttons[nextIdx]?.focus();
+              } else if (gp.justInteract) {
+                const targetBtn = activeIdx >= 0 ? buttons[activeIdx] : buttons[0];
+                targetBtn?.click();
+              }
             }
           } else if (st.screen === 'playing' && st.activeOverlay === 'none' && !st.finale.active) {
             if (gp.justInteract) {
@@ -1440,6 +1577,8 @@ export default function App() {
                 screenShake: settingsRef.current.screenShake,
                 reduceFlashes: settingsRef.current.reduceFlashes,
                 visualNoise: settingsRef.current.visualNoise,
+                reducedMotion: Boolean(settingsRef.current.reducedMotion),
+                paused: st.screen === 'paused',
               }
             );
           }
@@ -1548,158 +1687,167 @@ export default function App() {
         />
       )}
 
-      {screen === 'playing' && activeOverlay === 'assembly' && (
-        <AssemblyModal
-          collectedParts={runtime.state.collectedParts}
-          installedParts={runtime.state.installedParts}
-          onInstallPart={handleInstallPart}
-          onClose={closeActiveOverlay}
-        />
-      )}
+      <Suspense fallback={null}>
+        {screen === 'playing' && activeOverlay === 'assembly' && (
+          <AssemblyModal
+            collectedParts={runtime.state.collectedParts}
+            installedParts={runtime.state.installedParts}
+            onInstallPart={handleInstallPart}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'inventory' && (
-        <InventoryModal
-          collectedParts={runtime.state.collectedParts}
-          installedParts={runtime.state.installedParts}
-          collectedKeys={runtime.state.collectedKeys}
-          collectedTapes={runtime.state.collectedTapes}
-          discoveredSecrets={runtime.state.discoveredSecrets}
-          flashlightBattery={runtime.state.player.flashlightBattery}
-          batteries={runtime.state.player.batteries}
-          onReloadBattery={handleReloadBattery}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'inventory' && (
+          <InventoryModal
+            collectedParts={runtime.state.collectedParts}
+            installedParts={runtime.state.installedParts}
+            collectedKeys={runtime.state.collectedKeys}
+            collectedTapes={runtime.state.collectedTapes}
+            discoveredSecrets={runtime.state.discoveredSecrets}
+            flashlightBattery={runtime.state.player.flashlightBattery}
+            batteries={runtime.state.player.batteries}
+            reloadKeyLabel={formatKeyCode(settings.keyBindings.reload)}
+            journalKeyLabel={formatKeyCode(settings.keyBindings.journal)}
+            onReloadBattery={handleReloadBattery}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'journal' && (
-        <JournalModal
-          collectedNotes={runtime.state.collectedNotes}
-          readNoteIds={runtime.state.readNoteIds}
-          collectedKeys={runtime.state.collectedKeys}
-          collectedTapes={runtime.state.collectedTapes}
-          readTapeIds={runtime.state.readTapeIds}
-          discoveredRadioSignals={runtime.state.discoveredRadioSignals}
-          inspectedObjects={runtime.state.inspectedObjects}
-          installedParts={runtime.state.installedParts}
-          discoveredSecrets={runtime.state.discoveredSecrets}
-          observations={runtime.state.journalObservations}
-          mysteries={{
-            phoneListened: runtime.state.phoneListened,
-            clockSolved: runtime.state.clockSolved,
-            safeUnlocked: runtime.state.safeUnlocked,
-            terminalSolved: runtime.state.terminalSolved,
-            breakerFixed: runtime.state.breakerFixed,
-            radioTunedSecret: runtime.state.radioTunedSecret,
-          }}
-          initialNoteId={selectedNoteId}
-          onMarkNoteRead={handleMarkNoteRead}
-          onMarkTapeRead={handleMarkTapeRead}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'journal' && (
+          <JournalModal
+            collectedNotes={runtime.state.collectedNotes}
+            readNoteIds={runtime.state.readNoteIds}
+            collectedKeys={runtime.state.collectedKeys}
+            collectedTapes={runtime.state.collectedTapes}
+            readTapeIds={runtime.state.readTapeIds}
+            discoveredRadioSignals={runtime.state.discoveredRadioSignals}
+            inspectedObjects={runtime.state.inspectedObjects}
+            installedParts={runtime.state.installedParts}
+            discoveredSecrets={runtime.state.discoveredSecrets}
+            observations={runtime.state.journalObservations}
+            mysteries={{
+              phoneListened: runtime.state.phoneListened,
+              clockSolved: runtime.state.clockSolved,
+              safeUnlocked: runtime.state.safeUnlocked,
+              terminalSolved: runtime.state.terminalSolved,
+              breakerFixed: runtime.state.breakerFixed,
+              radioTunedSecret: runtime.state.radioTunedSecret,
+            }}
+            initialNoteId={selectedNoteId}
+            journalKeyLabel={formatKeyCode(settings.keyBindings.journal)}
+            onMarkNoteRead={handleMarkNoteRead}
+            onMarkTapeRead={handleMarkTapeRead}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'map' && (
-        <MapModal
-          currentFloor={runtime.state.player.floor}
-          currentRoomId={trackVisitedRoom(runtime.state)}
-          visitedRooms={runtime.state.visitedRooms}
-          collectedKeys={runtime.state.collectedKeys}
-          discoveredSecrets={runtime.state.discoveredSecrets}
-          breakerFixed={runtime.state.breakerFixed}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'map' && (
+          <MapModal
+            currentFloor={runtime.state.player.floor}
+            currentRoomId={getCurrentRoomId(runtime.state)}
+            visitedRooms={runtime.state.visitedRooms}
+            collectedKeys={runtime.state.collectedKeys}
+            discoveredSecrets={runtime.state.discoveredSecrets}
+            breakerFixed={runtime.state.breakerFixed}
+            mapKeyLabel={formatKeyCode(settings.keyBindings.map)}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'inspect' && activeInspectId && (
-        <InspectModal
-          targetId={activeInspectId}
-          installedParts={runtime.state.installedParts.length}
-          inspectedObjects={runtime.state.inspectedObjects}
-          discoveredSecrets={runtime.state.discoveredSecrets}
-          onInspectHotspot={handleInspectHotspot}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'inspect' && activeInspectId && (
+          <InspectModal
+            targetId={activeInspectId}
+            installedParts={runtime.state.installedParts.length}
+            inspectedObjects={runtime.state.inspectedObjects}
+            discoveredSecrets={runtime.state.discoveredSecrets}
+            onInspectHotspot={handleInspectHotspot}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'container' && activeContainerId && (
-        <ContainerModal
-          containerId={activeContainerId}
-          isAlreadyLooted={runtime.state.lootedContainers.includes(activeContainerId)}
-          collectedParts={runtime.state.collectedParts}
-          installedParts={runtime.state.installedParts}
-          collectedKeys={runtime.state.collectedKeys}
-          collectedNotes={runtime.state.collectedNotes}
-          onCollectAll={handleCollectContainer}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'container' && activeContainerId && (
+          <ContainerModal
+            containerId={activeContainerId}
+            isAlreadyLooted={runtime.state.lootedContainers.includes(activeContainerId)}
+            collectedParts={runtime.state.collectedParts}
+            installedParts={runtime.state.installedParts}
+            collectedKeys={runtime.state.collectedKeys}
+            collectedNotes={runtime.state.collectedNotes}
+            interactKeyCode={settings.keyBindings.interact}
+            interactKeyLabel={formatKeyCode(settings.keyBindings.interact)}
+            reloadKeyLabel={formatKeyCode(settings.keyBindings.reload)}
+            onCollectAll={handleCollectContainer}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'safe' && (
-        <SafeModal onSubmitCode={handleSafeCodeSubmit} onClose={closeActiveOverlay} />
-      )}
+        {screen === 'playing' && activeOverlay === 'safe' && (
+          <SafeModal onSubmitCode={handleSafeCodeSubmit} onClose={closeActiveOverlay} />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'clock' && (
-        <ClockModal
-          alreadySolved={runtime.state.clockSolved}
-          onSolved={handleClockSolved}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'clock' && (
+          <ClockModal
+            alreadySolved={runtime.state.clockSolved}
+            onSolved={handleClockSolved}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'terminal' && (
-        <TerminalModal
-          alreadySolved={runtime.state.terminalSolved}
-          installedParts={runtime.state.installedParts.length}
-          onSolved={handleTerminalSolved}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'terminal' && (
+          <TerminalModal
+            alreadySolved={runtime.state.terminalSolved}
+            installedParts={runtime.state.installedParts.length}
+            onSolved={handleTerminalSolved}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'breaker' && (
-        <BreakerModal
-          hasFuse={runtime.state.collectedKeys.includes('fuse')}
-          alreadyFixed={runtime.state.breakerFixed}
-          onSolved={handleBreakerSolved}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'breaker' && (
+          <BreakerModal
+            hasFuse={runtime.state.collectedKeys.includes('fuse')}
+            alreadyFixed={runtime.state.breakerFixed}
+            onSolved={handleBreakerSolved}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'playing' && activeOverlay === 'radio' && (
-        <RadioModal
-          alreadyTuned={runtime.state.radioTunedSecret}
-          onTuneSecret={handleRadioSecret}
-          onClose={closeActiveOverlay}
-        />
-      )}
+        {screen === 'playing' && activeOverlay === 'radio' && (
+          <RadioModal
+            alreadyTuned={runtime.state.radioTunedSecret}
+            onTuneSecret={handleRadioSecret}
+            onClose={closeActiveOverlay}
+          />
+        )}
 
-      {screen === 'paused' && (
-        <PauseModal
-          settings={settings}
-          saveSlots={saveSlots}
-          onUpdateSettings={updateSettings}
-          onSaveNow={handleSaveNow}
-          onSaveToSlot={handleSaveToSlot}
-          onLoadFromSlot={handleLoadFromSlot}
-          onDeleteSlot={handleDeleteSlot}
-          onExportSave={handleExportSave}
-          onImportSaveFile={handleImportSaveFile}
-          onResume={() => {
-            runtime.state.screen = 'playing';
-            setScreen('playing');
-          }}
-          onRestart={() => startNewGame(false)}
-          onExitToTitle={returnToTitleScreen}
-        />
-      )}
+        {screen === 'paused' && (
+          <PauseModal
+            settings={settings}
+            saveSlots={saveSlots}
+            onUpdateSettings={updateSettings}
+            onSaveNow={handleSaveNow}
+            onSaveToSlot={handleSaveToSlot}
+            onLoadFromSlot={handleLoadFromSlot}
+            onDeleteSlot={handleDeleteSlot}
+            onExportSave={handleExportSave}
+            onImportSaveFile={handleImportSaveFile}
+            onResume={() => {
+              runtime.state.screen = 'playing';
+              setScreen('playing');
+            }}
+            onRestart={() => startNewGame(false)}
+            onExitToTitle={returnToTitleScreen}
+          />
+        )}
 
-      {screen === 'gameover' && (
-        <EndingScreen
-          summary={runSummary}
-          unlockedEndings={unlockedEndings}
-          onPlayAgain={() => startNewGame(false)}
-          onReturnTitle={returnToTitleScreen}
-        />
-      )}
+        {screen === 'gameover' && (
+          <EndingScreen
+            summary={runSummary}
+            unlockedEndings={unlockedEndings}
+            onPlayAgain={() => startNewGame(false)}
+            onReturnTitle={returnToTitleScreen}
+          />
+        )}
+      </Suspense>
     </main>
   );
 }

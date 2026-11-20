@@ -69,6 +69,8 @@ export interface HorrorDirectorState {
   lastRoomId: string | null;
   triggeredAnomalies: string[];
   flickerTimer: number;
+  lastCategoryCooldowns?: Record<string, number>;
+  recentAnomalies?: string[];
 }
 
 export interface GameSettings {
@@ -77,18 +79,23 @@ export interface GameSettings {
   ambienceVolume: number; // 0..1
   sfxVolume: number; // 0..1
   voiceVolume: number; // 0..1
+  musicVolume?: number; // 0..1
+  uiVolume?: number; // 0..1
   subtitleSize: SubtitleSize;
   subtitleBg: boolean;
   textSpeed: TextSpeed;
   uiScale: UiScale;
   screenShake: boolean;
   reduceFlashes: boolean;
+  reducedMotion?: boolean;
   visualNoise: boolean;
   soundCaptions: boolean;
   difficulty: DifficultyMode;
   touchControls: boolean;
   touchSize: TouchSize;
   touchLayout: TouchLayout;
+  gamepadDeadzone?: number; // 0.08..0.5
+  gamepadVibration?: boolean;
   renderFpsCap?: RenderFpsCap;
   keyBindings: KeyBindings;
 }
@@ -319,6 +326,7 @@ export interface ShadowEncounterState {
   exposure: number; // 0..1 when shining bright light while standing
   cooldown: number;
   behavior: ShadowBehavior;
+  hideTimer?: number;
   guideTargetX?: number;
   guideHintShown?: boolean;
 }

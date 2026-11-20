@@ -28,6 +28,13 @@ export const SafeModal: React.FC<SafeModalProps> = ({ onSubmitCode, onClose }) =
     setDigits((prev) => prev.slice(0, -1));
   }, [status]);
 
+  const handleReset = useCallback(() => {
+    if (status === 'unlocked') return;
+    soundEngine.playUiSfx('cancel');
+    setStatus('idle');
+    setDigits('');
+  }, [status]);
+
   const handleSubmit = useCallback(() => {
     if (digits.length < 4 || status === 'unlocked') return;
     const ok = onSubmitCode(digits);
@@ -193,13 +200,25 @@ export const SafeModal: React.FC<SafeModalProps> = ({ onSubmitCode, onClose }) =
           </button>
         </div>
 
-        <p className="text-xs text-[#8495a8] text-center leading-relaxed">
+        <p aria-live="polite" className="text-xs text-[#8495a8] text-center leading-relaxed">
           {status === 'unlocked'
             ? 'Замок открыт — ключ «3-Т» забран из ячейки.'
             : status === 'error'
             ? 'Неверный код. Ищите дату сборки в бумагах кабинета.'
             : 'Четыре цифры (можно набирать с клавиатуры)'}
         </p>
+
+        {digits.length > 0 && status !== 'unlocked' && (
+          <div className="mt-2.5 flex justify-center">
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-3 py-1 border border-[#2c384a] bg-[#0e141c] hover:bg-[#172130] text-[11px] text-[#9cb0c4] cursor-pointer"
+            >
+              Сбросить ввод
+            </button>
+          </div>
+        )}
     </GameModal>
   );
 };

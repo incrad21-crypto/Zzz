@@ -48,6 +48,10 @@ export interface SimulationTimers {
   heartbeatTimer: number;
   houseCreakTimer: number;
   radioBlipCooldown: number;
+  clockTickTimer: number;
+  dripTimer: number;
+  hearthCrackleTimer: number;
+  servoHumTimer: number;
   activeRadioSignal: ActiveRadioSignalSnapshot | null;
 }
 
@@ -61,6 +65,10 @@ export function createSimulationTimers(): SimulationTimers {
     heartbeatTimer: 0,
     houseCreakTimer: 9.5,
     radioBlipCooldown: 0,
+    clockTickTimer: 1.0,
+    dripTimer: 2.8,
+    hearthCrackleTimer: 1.9,
+    servoHumTimer: 5.5,
     activeRadioSignal: null,
   };
 }
@@ -94,6 +102,7 @@ export function runSimulationStep(
   // Update Finale
   if (st.finale.active) {
     timers.activeRadioSignal = null;
+    soundEngine.setMoodTension('peak', 1);
     const finStep = updateFinale(st, stepDt);
     if (finStep.newDialogue) {
       callbacks.enqueueDialogues([finStep.newDialogue], true);
@@ -157,7 +166,8 @@ export function runSimulationStep(
             st.player.x >= r.x &&
             st.player.x <= r.x + r.width
         );
-        soundEngine.playFootstep(room?.floorMaterial ?? 'wood');
+        const footPan = Math.max(-0.22, Math.min(0.22, ((st.player.x - 560) / 560) * 0.22));
+        soundEngine.playFootstep(room?.floorMaterial ?? 'wood', footPan);
       }
     }
   }
@@ -227,6 +237,41 @@ export function runSimulationStep(
   ) {
     timers.tvStaticCooldown = 4.2;
     soundEngine.playSfx('static');
+  }
+
+  // Contextual spatial prop foley: grandfather clock tick (2F), basement drip (0F), fireplace crackle (1F), Echo-4 servo hum (1F pantry)
+  if (st.player.floor === 2 && Math.abs(st.player.x - 538) < 210) {
+    timers.clockTickTimer -= stepDt;
+    if (timers.clockTickTimer <= 0) {
+      timers.clockTickTimer = 1.0;
+      const clockPan = Math.max(-0.7, Math.min(0.7, (538 - st.player.x) / 210));
+      soundEngine.playSfx('clock_tick', clockPan);
+    }
+  }
+  if (st.player.floor === 0) {
+    timers.dripTimer -= stepDt;
+    if (timers.dripTimer <= 0) {
+      timers.dripTimer = 2.6 + Math.random() * 2.2;
+      const pipeX = st.player.x < 560 ? 450 : 790;
+      const dripPan = Math.max(-0.75, Math.min(0.75, (pipeX - st.player.x) / 220));
+      soundEngine.playSfx('drip', dripPan);
+    }
+  }
+  if (st.player.floor === 1 && st.installedParts.length >= 1 && Math.abs(st.player.x - 245) < 190) {
+    timers.hearthCrackleTimer -= stepDt;
+    if (timers.hearthCrackleTimer <= 0) {
+      timers.hearthCrackleTimer = 1.4 + Math.random() * 1.6;
+      const firePan = Math.max(-0.65, Math.min(0.65, (245 - st.player.x) / 190));
+      soundEngine.playSfx('hearth_crackle', firePan);
+    }
+  }
+  if (st.player.floor === 1 && st.installedParts.length >= 3 && st.player.x > 870) {
+    timers.servoHumTimer -= stepDt;
+    if (timers.servoHumTimer <= 0) {
+      timers.servoHumTimer = 6.2 + Math.random() * 3.5;
+      const servoPan = Math.max(-0.65, Math.min(0.65, (1020 - st.player.x) / 160));
+      soundEngine.playSfx('servo_hum', servoPan);
+    }
   }
 
   // Attic moved mannequin startled discovery when ascending to floor 4 at stage >= 5
@@ -308,6 +353,7 @@ export function runSimulationStep(
 
   // Horror Director: room visit tracking + spatial anomalies + tension pacing
   const anom = updateHorrorDirector(st, stepDt, difficulty);
+  soundEngine.setMoodTension(st.horror.mood, st.horror.tension);
   if (anom) {
     soundEngine.playSfx(anom.sound, anom.pan);
     if (soundCaptions) {

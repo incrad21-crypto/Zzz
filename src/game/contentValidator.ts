@@ -351,6 +351,11 @@ export function validateGameContent(): ContentValidationReport {
     }
   }
 
+  const progression = validateProgressionGraph();
+  if (!progression.valid) {
+    errors.push(...progression.errors);
+  }
+
   return {
     valid: errors.length === 0,
     errors,
@@ -365,5 +370,218 @@ export function validateGameContent(): ContentValidationReport {
       tapes: AUDIO_TAPES.length,
       radioSignals: ROOM_RADIO_SIGNALS.length,
     },
+  };
+}
+
+export interface ProgressionGraphReport {
+  valid: boolean;
+  errors: string[];
+  reachableRooms: string[];
+  reachableParts: string[];
+  reachableNotes: string[];
+  reachableSecrets: string[];
+  reachableTapes: string[];
+  reachableKeys: string[];
+  reachableEndings: string[];
+}
+
+export function validateProgressionGraph(): ProgressionGraphReport {
+  const errors: string[] = [];
+
+  const unlockedKeys = new Set<string>();
+  const unlockedSecrets = new Set<string>();
+  const collectedParts = new Set<string>();
+  const collectedNotes = new Set<string>();
+  const collectedTapes = new Set<string>();
+  const visitedRooms = new Set<string>();
+  let safeSolved = false;
+  let clockSolved = false;
+  let terminalSolved = false;
+  let breakerSolved = false;
+  let radioSecretSolved = false;
+
+  // Accessible floor segments: key is `${floor}:${minX}:${maxX}`
+  const accessibleSegments: { floor: number; minX: number; maxX: number }[] = [];
+
+  const isPositionAccessible = (floor: number, x: number): boolean =>
+    accessibleSegments.some((seg) => seg.floor === floor && x >= seg.minX && x <= seg.maxX);
+
+  // Start in forest -> trunk (flashlight) -> entrance -> floor 1
+  if (WORLD_INTERACTABLES.some((i) => i.id === 'forest_car_trunk')) {
+    unlockedKeys.add('flashlight');
+  }
+  if (WORLD_INTERACTABLES.some((i) => i.id === 'forest_house_door' && i.targetFloor === 1)) {
+    const f1 = FLOOR_BOUNDS[1];
+    accessibleSegments.push({ floor: 1, minX: f1.minX, maxX: f1.maxX });
+  }
+
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < 32) {
+    changed = false;
+    guard += 1;
+
+    // Expand floor 3 right wing once tech_key is acquired
+    if (unlockedKeys.has('tech_key') && isPositionAccessible(3, 660)) {
+      const f3 = FLOOR_BOUNDS[3];
+      if (!isPositionAccessible(3, 950)) {
+        accessibleSegments.push({ floor: 3, minX: 720, maxX: f3.maxX });
+        changed = true;
+      }
+    }
+
+    // Track reachable rooms
+    for (const room of HOUSE_ROOMS) {
+      const midX = room.x + room.width / 2;
+      if (isPositionAccessible(room.floor, midX) && !visitedRooms.has(room.id)) {
+        visitedRooms.add(room.id);
+        changed = true;
+      }
+    }
+
+    // Traverse accessible interactables
+    for (const item of WORLD_INTERACTABLES) {
+      if (item.zone !== 'house' || item.floor === undefined) continue;
+      if (!isPositionAccessible(item.floor, item.x)) continue;
+      if (item.requiresKey && !unlockedKeys.has(item.requiresKey)) continue;
+      if (item.requiresSecret && !unlockedSecrets.has(item.requiresSecret)) continue;
+      if (item.requiresBreaker && !breakerSolved) continue;
+
+      if (item.kind === 'stairs' || (item.kind === 'secret_trigger' && item.targetFloor !== undefined)) {
+        const tf = item.targetFloor;
+        const tx = item.targetX ?? item.x;
+        if (tf !== undefined && !isPositionAccessible(tf, tx)) {
+          const tb = (FLOOR_BOUNDS as Record<number, { minX: number; maxX: number }>)[tf];
+          if (tb) {
+            if (tf === 3 && !unlockedKeys.has('tech_key')) {
+              accessibleSegments.push({ floor: 3, minX: tb.minX, maxX: 712 });
+            } else if (tf === 0 && tx >= 320) {
+              accessibleSegments.push({ floor: 0, minX: 336, maxX: tb.maxX });
+            } else if (tf === 0 && tx < 320) {
+              accessibleSegments.push({ floor: 0, minX: tb.minX, maxX: 304 });
+            } else {
+              accessibleSegments.push({ floor: tf, minX: tb.minX, maxX: tb.maxX });
+            }
+            changed = true;
+          }
+        }
+      }
+
+      if (item.kind === 'safe' && !safeSolved) {
+        safeSolved = true;
+        unlockedKeys.add('tech_key');
+        changed = true;
+      }
+      if (item.kind === 'clock_puzzle' && !clockSolved) {
+        clockSolved = true;
+        unlockedKeys.add('basement_key');
+        changed = true;
+      }
+      if (item.kind === 'terminal_puzzle' && !terminalSolved) {
+        terminalSolved = true;
+        changed = true;
+      }
+      if (item.kind === 'breaker_puzzle' && !breakerSolved) {
+        breakerSolved = true;
+        changed = true;
+      }
+      if (item.kind === 'radio_tuner' && !radioSecretSolved) {
+        radioSecretSolved = true;
+        changed = true;
+      }
+
+      if (item.keyId && !unlockedKeys.has(item.keyId)) {
+        unlockedKeys.add(item.keyId);
+        changed = true;
+      }
+      if (item.secretId && !unlockedSecrets.has(item.secretId)) {
+        unlockedSecrets.add(item.secretId);
+        changed = true;
+      }
+      if (item.partId && !collectedParts.has(item.partId)) {
+        collectedParts.add(item.partId);
+        changed = true;
+      }
+      if (item.noteId && !collectedNotes.has(item.noteId)) {
+        collectedNotes.add(item.noteId);
+        changed = true;
+      }
+      if (item.tapeId && !collectedTapes.has(item.tapeId)) {
+        collectedTapes.add(item.tapeId);
+        changed = true;
+      }
+      if (item.inspectId === 'mirror' && !unlockedSecrets.has('secret_mirror_whisper')) {
+        unlockedSecrets.add('secret_mirror_whisper');
+        changed = true;
+      }
+      if (item.inspectId === 'attic_mannequin' && !unlockedSecrets.has('secret_attic_badge')) {
+        unlockedSecrets.add('secret_attic_badge');
+        changed = true;
+      }
+      if (item.inspectId === 'phone_tape' && !collectedTapes.has('tape_01')) {
+        collectedTapes.add('tape_01');
+        changed = true;
+      }
+    }
+  }
+
+  for (const room of HOUSE_ROOMS) {
+    if (!visitedRooms.has(room.id)) {
+      errors.push(`Progression blocker: room ${room.id} is unreachable from start`);
+    }
+  }
+  for (const partId of Object.keys(PART_BY_ID)) {
+    if (!collectedParts.has(partId)) {
+      errors.push(`Progression blocker: part ${partId} is unreachable`);
+    }
+  }
+  for (const note of ALL_NOTES) {
+    if (!collectedNotes.has(note.id)) {
+      errors.push(`Progression blocker: note ${note.id} is unreachable`);
+    }
+  }
+  for (const sec of SECRETS) {
+    if (!unlockedSecrets.has(sec.id)) {
+      errors.push(`Progression blocker: secret ${sec.id} is unreachable`);
+    }
+  }
+  for (const tape of AUDIO_TAPES) {
+    if (!collectedTapes.has(tape.id)) {
+      errors.push(`Progression blocker: tape ${tape.id} is unreachable`);
+    }
+  }
+  for (const keyId of Object.keys(KEY_LABELS)) {
+    if (!unlockedKeys.has(keyId)) {
+      errors.push(`Progression blocker: key item ${keyId} is unreachable`);
+    }
+  }
+
+  const reachableEndings: string[] = [];
+  if (collectedParts.size === Object.keys(PART_BY_ID).length && isPositionAccessible(1, 1020)) {
+    reachableEndings.push('awakening', 'liberation');
+    if (
+      terminalSolved &&
+      radioSecretSolved &&
+      collectedNotes.size >= 6 &&
+      unlockedSecrets.size >= 3
+    ) {
+      reachableEndings.push('last_record');
+    } else {
+      errors.push('Progression blocker: true ending last_record preconditions are not met');
+    }
+  } else {
+    errors.push('Progression blocker: robot workbench finale cannot be reached with 8 parts');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    reachableRooms: [...visitedRooms],
+    reachableParts: [...collectedParts],
+    reachableNotes: [...collectedNotes],
+    reachableSecrets: [...unlockedSecrets],
+    reachableTapes: [...collectedTapes],
+    reachableKeys: [...unlockedKeys],
+    reachableEndings,
   };
 }
